@@ -8,6 +8,7 @@ from core.config import config
 from storage.database.models.emoji import CrawlEmoji, Status
 from extraction.interface import ICrawler
 from extraction.strategies.discord import (
+    DiscordPaginationStrategy,
     DiscordSeleniumFetchStrategy,
     DiscordTopicDiscoveryStrategy,
     DiscordEmojiExtractionStrategy
@@ -24,7 +25,7 @@ class DiscordEmojiCrawler(ICrawler):
 
     ROOT_URL = 'https://discords.com/'
 
-    def __init__(self, headless: bool = config.crawler.headless, max_workers: int = 4, batch_size: int = 20):
+    def __init__(self, headless: bool = config.crawler.headless, max_workers: int = 4, batch_size: int = 20, max_pages: int = 1000):
         super().__init__(max_workers=max_workers, batch_size=batch_size)
         self.headless = headless
         self.driver = None
@@ -33,6 +34,8 @@ class DiscordEmojiCrawler(ICrawler):
         self.fetch_strategy = DiscordSeleniumFetchStrategy(self.driver)
         self.discovery_strategy = DiscordTopicDiscoveryStrategy()
         self.extraction_strategy = DiscordEmojiExtractionStrategy()
+        self.pagination_strategy = DiscordPaginationStrategy(
+            max_pages=max_pages)
 
         self.repo = CrawlEmojiRepository()
         self.producer = KafkaMessageProducer()
@@ -84,14 +87,20 @@ class DiscordEmojiCrawler(ICrawler):
 
                 self.initialize_driver()
                 self.fetch_strategy = DiscordSeleniumFetchStrategy(self.driver)
+                
+        return ""
 
     def discover_sources(self, url: str) -> List[str]:
         """Discover topics to crawl with duplicate filtering"""
         if self.is_processed(url):
             logger.info(f"URL already processed: {url}")
             return []
-
+        
         self.mark_processed(url)
+        
+        if not url.endswith('/emoji-list'):
+            return [url]
+
         html = self.fetch(url)
         urls = self.discovery_strategy.discover(html, self.ROOT_URL)
 
@@ -99,6 +108,15 @@ class DiscordEmojiCrawler(ICrawler):
         logger.info(f"Discovered {len(new_urls)} new URLs from {url}")
 
         return new_urls
+    
+    def get_pagination_urls(self, url: str) -> List[str]:
+        """Get pagination URLs for a topic page"""
+        # Fetch the page content
+        html = self.fetch(url)
+
+        # Use pagination strategy to extract all pagination URLs
+        return self.pagination_strategy.get_pagination_urls(html, url, self.max_pages)
+
 
     def extract_items(self, url: str) -> List[Dict[str, Any]]:
         """Extract emoji data from a topic page"""
@@ -106,9 +124,17 @@ class DiscordEmojiCrawler(ICrawler):
             logger.info(f"URL already processed for extraction: {url}")
             return []
 
-        self.mark_processed(url)
         html = self.fetch(url)
+        
+        if not self.pagination_strategy.is_valid_page(html):
+            logger.warning(f"Invalid or empty page: {url}")
+            self.mark_processed(url)
+            return []
+        
         items = self.extraction_strategy.extract(html, self.ROOT_URL)
+        
+        self.mark_processed(url)
+
 
         logger.info(f"Extracted {len(items)} emojis from {url}")
         return items
@@ -167,6 +193,8 @@ class DiscordEmojiCrawler(ICrawler):
 
         except Exception as e:
             logger.error(f"Error in post_process: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
 
     def cleanup(self):

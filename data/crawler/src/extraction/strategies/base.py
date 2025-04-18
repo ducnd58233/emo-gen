@@ -53,3 +53,48 @@ class FetchStrategy(ABC):
             The fetched content
         """
         pass
+
+
+class PaginationStrategy(ABC):
+    """Strategy for handling pagination across multiple pages"""
+
+    @abstractmethod
+    def get_next_page_url(self, html: str, current_url: str) -> Optional[str]:
+        """
+        Extract the URL for the next page from the current page.
+        
+        Args:
+            html: The HTML content of the current page
+            current_url: The URL of the current page
+            
+        Returns:
+            URL of the next page, or None if there is no next page
+        """
+        pass
+
+    @abstractmethod
+    def get_pagination_urls(self, html: str, base_url: str, max_pages: int = None) -> List[str]:
+        """
+        Extract all pagination URLs from the current page.
+        
+        Args:
+            html: The HTML content
+            base_url: The base URL for resolving relative URLs
+            max_pages: Maximum number of pages to return (default: all)
+            
+        Returns:
+            List of all pagination URLs
+        """
+        pass
+
+    def is_valid_page(self, html: str) -> bool:
+        """
+        Check if the page contains valid content (not empty, not error).
+        
+        Args:
+            html: The HTML content to check
+            
+        Returns:
+            True if the page is valid, False otherwise
+        """
+        return True
