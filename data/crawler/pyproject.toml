@@ -6,7 +6,7 @@ authors = [
     {name = "ducnd58233",email = "only4wns@gmail.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
     "sqlalchemy (>=2.0.40,<3.0.0)",
     "beautifulsoup4 (>=4.13.4,<5.0.0)",
@@ -17,7 +17,9 @@ dependencies = [
     "webdriver-manager (>=4.0.2,<5.0.0)",
     "pydantic (>=2.11.3,<3.0.0)",
     "pydantic-settings (>=2.9.0,<3.0.0)",
-    "kafka-python (>=2.1.5,<3.0.0)"
+    "kafka-python (>=2.1.5,<3.0.0)",
+    "minio (>=7.2.15,<8.0.0)",
+    "pyspark (>=3.2.0,<4.0.0)"
 ]
 
 

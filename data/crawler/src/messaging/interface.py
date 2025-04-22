@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Callable
 from messaging.schema import Message
 
 
@@ -27,6 +27,11 @@ class Consumer(ABC):
         pass
 
     @abstractmethod
-    def start(self) -> None:
+    def start(self, callback: Callable[[Message], None]) -> None:
         """Start consuming messages"""
+        pass
+
+    @abstractmethod
+    def stop(self) -> None:
+        """Stop consuming messages"""
         pass

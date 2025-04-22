@@ -8,10 +8,7 @@ from storage.database.models.base import Base
 
 class Status(Enum):
     CRAWLED = "crawled"
-    PENDING = "pending"
-    SUCCESS = "success"
-    SKIPPED = "skipped"
-    DUPLICATED = "duplicated"
+    PROCESSED = "processed"
     FAILED = "failed"
 
 

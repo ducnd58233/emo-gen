@@ -27,16 +27,16 @@ class ICrawler(ABC):
     def crawl(self, url: str) -> List[Dict[str, Any]]:
         """
         Template method defining the crawling workflow with batch processing.
-        
+
         Steps:
         1. Discover sources (topics, categories, etc.)
         2. Process sources in batches
         3. For each batch, extract items in parallel
         4. Process and save results in batches
-        
+
         Args:
             url: The starting URL to crawl
-            
+
         Returns:
             List of extracted items
         """
@@ -104,22 +104,22 @@ class ICrawler(ABC):
         """
         Get pagination URLs for a source URL.
         Default implementation returns empty list.
-        
+
         Args:
             url: Source URL
-            
+
         Returns:
             List of pagination URLs
         """
         return []
-    
+
     def process_batch(self, urls: List[str]) -> List[Dict[str, Any]]:
         """
         Process a batch of URLs in parallel
-        
+
         Args:
             urls: List of URLs to process
-            
+
         Returns:
             Combined results from all URLs
         """
@@ -146,7 +146,7 @@ class ICrawler(ABC):
     def mark_processed(self, url: str) -> None:
         """
         Mark URL as processed to avoid duplicates
-        
+
         Args:
             url: URL to mark as processed
         """
@@ -155,10 +155,10 @@ class ICrawler(ABC):
     def is_processed(self, url: str) -> bool:
         """
         Check if URL has already been processed
-        
+
         Args:
             url: URL to check
-            
+
         Returns:
             True if already processed, False otherwise
         """

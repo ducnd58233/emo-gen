@@ -1,35 +1,66 @@
-import argparse
+import signal
+import sys
+import threading
 
-from core.logger import logger
+from core.logger import get_logger
+from core.config import config
 from extraction.factory import CrawlerFactory
+from processing.manager import ProcessingManager
+from processing.spark.session import SparkSessionManager
+
+logger = get_logger("main")
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='Emoji Generator Crawler')
-    parser.add_argument('--source', type=str, default='discord',
-                        help='Source to crawl (default: discord)')
-    parser.add_argument('--url', type=str, default='https://discords.com/emoji-list',
-                        help='URL to crawl (default: https://discords.com/emoji-list)')
-    parser.add_argument('--headless', action='store_true', default=True,
-                        help='Run browser in headless mode')
-    parser.add_argument('--worker-count', type=int, default=4,
-                        help='Number of worker threads for processing')
+def signal_handler(sig, frame):
+    """Handle Ctrl+C signal"""
+    logger.info("Received shutdown signal, exiting...")
+    # Stop spark session
+    SparkSessionManager().stop()
+    sys.exit(0)
 
-    return parser.parse_args()
 
-if __name__ == "__main__":
-    args = parse_args()
+def main():
+    # Register signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     try:
-        crawler = CrawlerFactory.create_crawler(
-            source=args.source,
-            headless=args.headless
+        # Start the processing manager
+        processing_manager = ProcessingManager(
+            topic=config.kafka.emoji_topic,
+            pipeline_type="emoji",
+            group_id=config.kafka.group_id
         )
 
-        logger.info(f"Starting crawler for {args.source} at {args.url}")
-        results = crawler.crawl(args.url)
+        # Start processing in a non-blocking way (will be implemented in ProcessingManager)
+        processing_manager.start(non_blocking=True)
+
+        # Initialize crawler with sensible defaults from config
+        crawler = CrawlerFactory.create_crawler(
+            source="discord",
+            headless=config.crawler.headless,
+            max_workers=4
+        )
+
+        # Start crawling
+        logger.info(
+            f"Starting crawler for discord at {crawler.ROOT_URL}emoji-list")
+        results = crawler.crawl(f"{crawler.ROOT_URL}emoji-list")
         logger.info(f"Crawling completed. Found {len(results)} emojis.")
 
+    except KeyboardInterrupt:
+        logger.info("Keyboard interrupt received, shutting down...")
     except Exception as e:
-        logger.error(f"Error during crawling: {e}")
+        logger.error(f"Error in main loop: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+    finally:
+        # Clean up resources
+        if 'processing_manager' in locals():
+            processing_manager.stop()
+        SparkSessionManager().stop()
+        logger.info("Shutdown complete")
 
+
+if __name__ == "__main__":
+    main()

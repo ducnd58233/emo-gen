@@ -2,8 +2,9 @@
 
 - Create environment (if not already created)
 ```
-conda create -n emogen-crawler python=3.12
+conda create -n emogen-crawler python=3.10
 conda activate emogen-crawler
+conda install -c conda-forge openjdk=11
 pip install setuptools
 pip install poetry
 ```
@@ -44,7 +45,7 @@ docker compose -f deployments/docker/docker-compose.<env>.yml up -d
 cp .env.example .env
 ```
 
-- Run crawler
+- Run pipeline
 ```
 poetry run python src/main.py
 ```

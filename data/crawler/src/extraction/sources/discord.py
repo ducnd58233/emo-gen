@@ -5,6 +5,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 from core.logger import get_logger
 from core.config import config
+from core.decorator import retry, timer, lazy_property
 from storage.database.models.emoji import CrawlEmoji, Status
 from extraction.interface import ICrawler
 from extraction.strategies.discord import (
@@ -31,15 +32,27 @@ class DiscordEmojiCrawler(ICrawler):
         self.driver = None
         self.initialize_driver()
 
-        self.fetch_strategy = DiscordSeleniumFetchStrategy(self.driver)
-        self.discovery_strategy = DiscordTopicDiscoveryStrategy()
-        self.extraction_strategy = DiscordEmojiExtractionStrategy()
-        self.pagination_strategy = DiscordPaginationStrategy(
-            max_pages=max_pages)
-
+        self.max_pages = max_pages
         self.repo = CrawlEmojiRepository()
         self.producer = KafkaMessageProducer()
 
+    @lazy_property
+    def fetch_strategy(self):
+        return DiscordSeleniumFetchStrategy(self.driver)
+
+    @lazy_property
+    def discovery_strategy(self):
+        return DiscordTopicDiscoveryStrategy()
+
+    @lazy_property
+    def extraction_strategy(self):
+        return DiscordEmojiExtractionStrategy()
+
+    @lazy_property
+    def pagination_strategy(self):
+        return DiscordPaginationStrategy(max_pages=self.max_pages)
+
+    @timer(log_level="info", name="Initialize WebDriver")
     def initialize_driver(self):
         """Initialize or re-initialize the WebDriver"""
         try:
@@ -67,37 +80,21 @@ class DiscordEmojiCrawler(ICrawler):
             logger.error(f"Error initializing ChromeDriver: {e}")
             raise
 
+    @retry(max_attempts=3, delay=1, backoff=2, exceptions=(Exception,))
+    @timer(log_level="debug", name="Fetch URL")
     def fetch(self, url: str) -> str:
         """Fetch HTML content using the fetch strategy with retry mechanism"""
-        max_retries = 3
-        retry_count = 0
+        return self.fetch_strategy.fetch(url)
 
-        while retry_count < max_retries:
-            try:
-                return self.fetch_strategy.fetch(url)
-            except Exception as e:
-                retry_count += 1
-                logger.warning(
-                    f"Fetch attempt {retry_count} failed for {url}: {e}")
-
-                if retry_count >= max_retries:
-                    logger.error(
-                        f"Failed to fetch {url} after {max_retries} attempts")
-                    raise
-
-                self.initialize_driver()
-                self.fetch_strategy = DiscordSeleniumFetchStrategy(self.driver)
-                
-        return ""
-
+    @timer(log_level="debug", name="Discover Sources")
     def discover_sources(self, url: str) -> List[str]:
         """Discover topics to crawl with duplicate filtering"""
         if self.is_processed(url):
             logger.info(f"URL already processed: {url}")
             return []
-        
+
         self.mark_processed(url)
-        
+
         if not url.endswith('/emoji-list'):
             return [url]
 
@@ -108,16 +105,14 @@ class DiscordEmojiCrawler(ICrawler):
         logger.info(f"Discovered {len(new_urls)} new URLs from {url}")
 
         return new_urls
-    
+
+    @timer(log_level="debug", name="Get Pagination URLs")
     def get_pagination_urls(self, url: str) -> List[str]:
         """Get pagination URLs for a topic page"""
-        # Fetch the page content
         html = self.fetch(url)
-
-        # Use pagination strategy to extract all pagination URLs
         return self.pagination_strategy.get_pagination_urls(html, url, self.max_pages)
 
-
+    @timer(log_level="debug", name="Extract Items")
     def extract_items(self, url: str) -> List[Dict[str, Any]]:
         """Extract emoji data from a topic page"""
         if self.is_processed(url):
@@ -125,26 +120,25 @@ class DiscordEmojiCrawler(ICrawler):
             return []
 
         html = self.fetch(url)
-        
+
         if not self.pagination_strategy.is_valid_page(html):
             logger.warning(f"Invalid or empty page: {url}")
             self.mark_processed(url)
             return []
-        
-        items = self.extraction_strategy.extract(html, self.ROOT_URL)
-        
-        self.mark_processed(url)
 
+        items = self.extraction_strategy.extract(html, self.ROOT_URL)
+
+        self.mark_processed(url)
 
         logger.info(f"Extracted {len(items)} emojis from {url}")
         return items
 
+    @timer(log_level="info", name="Post Process Results")
     def post_process(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Save to database and publish to Kafka in batches"""
         if not results:
             return results
 
-        # Convert to model objects
         emoji_objects = [
             CrawlEmoji(
                 name=item['name'],
@@ -155,14 +149,11 @@ class DiscordEmojiCrawler(ICrawler):
         ]
 
         try:
-            # Save to database with batch upsert
             saved_emojis = self.repo.bulk_upsert(emoji_objects, ['name'])
 
-            # Process in batches for Kafka publishing
             for i in range(0, len(saved_emojis), self.batch_size):
                 batch = saved_emojis[i:i+self.batch_size]
 
-                # Filter new emojis only
                 new_emojis = [
                     emoji for emoji in batch if emoji.status == Status.CRAWLED]
 
@@ -172,7 +163,7 @@ class DiscordEmojiCrawler(ICrawler):
                             "id": emoji.id,
                             "name": emoji.name,
                             "image_url": emoji.image_url,
-                            "status": emoji.status.name
+                            "status": emoji.status.value
                         }
                         for emoji in new_emojis
                     ]
@@ -182,7 +173,6 @@ class DiscordEmojiCrawler(ICrawler):
                         payload={"emojis": emoji_data}
                     )
 
-                    # Publish to Kafka
                     self.producer.produce(
                         config.kafka.emoji_topic, batch_message)
                     logger.info(
