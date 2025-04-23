@@ -20,6 +20,7 @@ class CrawlEmoji(Base):
     status = Column(
         SQLAlchemyEnum(Status), nullable=False, default=Status.CRAWLED, index=True
     )
+    source = Column(String, nullable=False)
     created_at = Column(DateTime, server_default=func.current_timestamp())
     updated_at = Column(
         DateTime,
@@ -36,5 +37,6 @@ class SourceEmoji(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, unique=True)
+    source = Column(String, nullable=False)
     image_path = Column(String, nullable=False)
     created_at = Column(DateTime, server_default=func.current_timestamp())

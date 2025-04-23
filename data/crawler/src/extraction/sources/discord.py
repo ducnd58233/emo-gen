@@ -20,6 +20,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 logger = get_logger("extraction.sources.discord")
 
+SOURCE = "discords"
+
 
 class DiscordEmojiCrawler(ICrawler):
     """Discord emoji crawler using the enhanced ICrawler interface"""
@@ -150,7 +152,10 @@ class DiscordEmojiCrawler(ICrawler):
 
         emoji_objects = [
             CrawlEmoji(
-                name=item["name"], image_url=item["image_url"], status=Status.CRAWLED
+                name=item["name"],
+                image_url=item["image_url"],
+                status=Status.CRAWLED,
+                source=SOURCE,
             )
             for item in results
         ]
@@ -159,7 +164,7 @@ class DiscordEmojiCrawler(ICrawler):
             saved_emojis = self.repo.bulk_upsert(emoji_objects, ["name"])
 
             for i in range(0, len(saved_emojis), self.batch_size):
-                batch = saved_emojis[i : i + self.batch_size]
+                batch = saved_emojis[i: i + self.batch_size]
 
                 new_emojis = [
                     emoji for emoji in batch if emoji.status == Status.CRAWLED
@@ -172,6 +177,7 @@ class DiscordEmojiCrawler(ICrawler):
                             "name": emoji.name,
                             "image_url": emoji.image_url,
                             "status": emoji.status.value,
+                            "source": emoji.source,
                         }
                         for emoji in new_emojis
                     ]
@@ -180,7 +186,8 @@ class DiscordEmojiCrawler(ICrawler):
                         type="emoji_batch", payload={"emojis": emoji_data}
                     )
 
-                    self.producer.produce(config.kafka.emoji_topic, batch_message)
+                    self.producer.produce(
+                        config.kafka.emoji_topic, batch_message)
                     logger.info(
                         f"Published batch of {len(new_emojis)} new emojis to Kafka"
                     )
@@ -191,7 +198,6 @@ class DiscordEmojiCrawler(ICrawler):
         except Exception as e:
             logger.error(f"Error in post_process: {e}")
             import traceback
-
             logger.error(traceback.format_exc())
             return []
 
@@ -243,7 +249,8 @@ class DiscordEmojiCrawler(ICrawler):
                 empty_page_found = False
                 for page_url in pagination_urls:
                     if self.is_processed(page_url):
-                        logger.info(f"Skipping already processed page: {page_url}")
+                        logger.info(
+                            f"Skipping already processed page: {page_url}")
                         continue
 
                     # Extract items from this page
@@ -259,18 +266,20 @@ class DiscordEmojiCrawler(ICrawler):
 
                     # Process emojis in batches
                     for i in range(0, len(page_results), self.batch_size):
-                        batch = page_results[i : i + self.batch_size]
+                        batch = page_results[i: i + self.batch_size]
                         processed_batch = self.post_process(batch)
                         all_results.extend(processed_batch)
 
-                    logger.info(f"Processed {len(page_results)} emojis from {page_url}")
+                    logger.info(
+                        f"Processed {len(page_results)} emojis from {page_url}")
 
                 if empty_page_found:
                     logger.info(
                         f"Completed crawling topic {source_url} due to empty page"
                     )
                 else:
-                    logger.info(f"Completed crawling all pages for topic {source_url}")
+                    logger.info(
+                        f"Completed crawling all pages for topic {source_url}")
 
             logger.info(
                 f"Crawl completed, processed {len(self.processed_urls)} URLs, found {len(all_results)} emojis"
