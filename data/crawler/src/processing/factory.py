@@ -4,8 +4,9 @@ from core.logger import get_logger
 from processing.interface import Pipeline, PipelineStage
 from processing.pipelines.emoji import EmojiPipeline
 from processing.stages.emoji.download import EmojiDownloadStage
+from processing.stages.emoji.metadata_storage import MetadataStorageStage
+from processing.stages.emoji.minio_storage import MinioStorageStage
 from processing.stages.emoji.status_update import FinalStatusUpdateStage
-from processing.stages.emoji.storage import StorageStage
 from processing.stages.emoji.validation import MessageValidationStage, StatusCheckStage
 
 logger = get_logger("processing.factory")
@@ -21,7 +22,8 @@ class StageFactory:
             MessageValidationStage(pipeline),
             StatusCheckStage(),
             EmojiDownloadStage(),
-            StorageStage(),
+            MinioStorageStage(),
+            MetadataStorageStage(),
             FinalStatusUpdateStage(),
         ]
 
@@ -80,7 +82,8 @@ class PipelineFactory:
             stages = StageFactory.create_emoji_stages(pipeline)
             builder.with_stages(stages)
 
-        logger.info(f"Created and configured pipeline of type: {pipeline_type}")
+        logger.info(
+            f"Created and configured pipeline of type: {pipeline_type}")
         return builder.build()
 
     @classmethod

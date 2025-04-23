@@ -6,63 +6,58 @@ from core.decorator import retry, timer
 from core.logger import get_logger
 from processing.interface import PipelineContext
 from processing.stages.base import BaseStage
-from pyspark.sql import DataFrame
-from storage.database.repositories.crawl_emoji_repository import CrawlEmojiRepository
-from storage.database.repositories.source_emoji_repository import SourceEmojiRepository
+from pyspark.sql import DataFrame, Row
 from storage.minio.client import MinioClient
 
-logger = get_logger("processing.stages.emoji.storage")
+logger = get_logger("processing.stages.emoji.minio_storage")
 
 # Constants
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 2
 EMOJI_STORAGE_PREFIX = "emoji"
-BATCH_SIZE = 20
+BATCH_SIZE = 10  # Reduced batch size for better reliability
 
 
-class StorageStage(BaseStage[DataFrame, DataFrame]):
-    """Stage for storing emoji images to MinIO and updating database records"""
+class MinioStorageStage(BaseStage[DataFrame, DataFrame]):
+    """Stage for storing emoji images to MinIO storage"""
 
     def __init__(
         self,
         minio_client: Optional[MinioClient] = None,
-        source_emoji_repo: Optional[SourceEmojiRepository] = None,
-        crawl_emoji_repo: Optional[CrawlEmojiRepository] = None,
     ):
-        """Initialize StorageStage with optional clients and repositories.
+        """Initialize MinioStorageStage with optional MinIO client.
 
         Args:
             minio_client: MinIO client for storing images
-            source_emoji_repo: Repository for source emoji records
-            crawl_emoji_repo: Repository for crawl emoji records
         """
-        super().__init__("emoji_storage")
+        super().__init__("emoji_minio_storage")
         self.minio_client = minio_client or MinioClient()
-        self.source_emoji_repo = source_emoji_repo or SourceEmojiRepository()
-        self.crawl_emoji_repo = crawl_emoji_repo or CrawlEmojiRepository()
 
+        # Access the client property to ensure client and buckets are initialized
         _ = self.minio_client.client
 
-    @timer(name="Storage Stage Process")
+    @timer(name="MinIO Storage Stage Process")
     def _process_impl(self, input_df: DataFrame, context: PipelineContext) -> DataFrame:
-        """Process downloaded emojis by storing them in MinIO and updating database records.
+        """Process downloaded emojis by storing them in MinIO.
 
         Args:
             input_df: DataFrame with emoji data and downloaded image content
             context: Pipeline context
 
         Returns:
-            DataFrame with updated storage information
+            DataFrame with updated storage_path information
         """
         if input_df.rdd.isEmpty():
-            logger.warning("Empty DataFrame, skipping storage stage")
+            logger.warning("Empty DataFrame, skipping MinIO storage stage")
             return input_df
 
         all_emoji_ids = context.get("all_emoji_ids", [])
         if not all_emoji_ids:
-            logger.warning("No emoji IDs found in context, skipping storage")
+            logger.warning(
+                "No emoji IDs found in context, skipping MinIO storage")
             return input_df
 
+        # Extract data from DataFrame with image data
         emoji_data = input_df.select(
             "id", "name", "image_data", "source").collect()
 
@@ -70,36 +65,37 @@ class StorageStage(BaseStage[DataFrame, DataFrame]):
         storage_results = self._process_emoji_batches(emoji_data)
 
         # Update context with results
-        successful_ids = [emoji_id for emoji_id,
+        successful_ids = [emoji_id for emoji_id, _,
                           success in storage_results if success]
-        failed_ids = [emoji_id for emoji_id,
+        failed_ids = [emoji_id for emoji_id, _,
                       success in storage_results if not success]
+        storage_paths = {emoji_id: path for emoji_id,
+                         path, success in storage_results if success}
 
-        context.set("stored_emoji_ids", successful_ids)
-        context.set("storage_failed_ids", failed_ids)
-        # For status update stage
-        context.set("successful_emoji_ids", successful_ids)
-
-        logger.info(
-            f"Storage complete: {len(successful_ids)} succeeded, {len(failed_ids)} failed"
-        )
+        context.set("minio_stored_emoji_ids", successful_ids)
+        context.set("minio_failed_emoji_ids", failed_ids)
+        context.set("emoji_storage_paths", storage_paths)
 
         # Add storage_path column to DataFrame for downstream stages
         result_df = self._update_dataframe_with_storage_paths(
             input_df, storage_results)
 
+        logger.info(
+            f"MinIO storage complete: {len(successful_ids)} succeeded, {len(failed_ids)} failed"
+        )
+
         return result_df
 
     def _process_emoji_batches(
-        self, emoji_data: List[Dict[str, Any]]
-    ) -> List[Tuple[str, bool]]:
+        self, emoji_data: List[Row]
+    ) -> List[Tuple[str, str, bool]]:
         """Process emojis in batches for better performance.
 
         Args:
             emoji_data: List of emoji rows from DataFrame
 
         Returns:
-            List of tuples (emoji_id, success_flag)
+            List of tuples (emoji_id, storage_path, success_flag)
         """
         results = []
         total_batches = (len(emoji_data) + BATCH_SIZE - 1) // BATCH_SIZE
@@ -107,13 +103,14 @@ class StorageStage(BaseStage[DataFrame, DataFrame]):
         for batch_idx, batch_start in enumerate(range(0, len(emoji_data), BATCH_SIZE)):
             batch = emoji_data[batch_start: batch_start + BATCH_SIZE]
             logger.info(
-                f"Processing storage batch {batch_idx + 1}/{total_batches} ({len(batch)} emojis)"
+                f"Processing MinIO storage batch {batch_idx + 1}/{total_batches} ({len(batch)} emojis)"
             )
 
             batch_results = self._store_emoji_batch(batch)
             results.extend(batch_results)
 
-            success_count = sum(1 for _, success in batch_results if success)
+            success_count = sum(
+                1 for _, _, success in batch_results if success)
             logger.info(
                 f"Batch {batch_idx + 1} results: {success_count}/{len(batch)} successful"
             )
@@ -121,61 +118,41 @@ class StorageStage(BaseStage[DataFrame, DataFrame]):
         return results
 
     def _store_emoji_batch(
-        self, emoji_batch: List[Dict[str, Any]]
-    ) -> List[Tuple[str, bool]]:
-        """Store a batch of emoji images and update database records.
+        self, emoji_batch: List[Row]
+    ) -> List[Tuple[str, str, bool]]:
+        """Store a batch of emoji images in MinIO.
 
         Args:
             emoji_batch: List of emoji data dictionaries
 
         Returns:
-            List of tuples (emoji_id, success_flag)
+            List of tuples (emoji_id, storage_path, success_flag)
         """
-        minio_results = []
-        source_emoji_data = []
+        results = []
 
         for emoji in emoji_batch:
-            emoji_id = emoji["id"]
+            emoji_id = str(emoji["id"])
             name = emoji["name"]
             image_data = emoji["image_data"]
             source = emoji["source"]
 
             if image_data is None:
                 logger.warning(
-                    f"No image data for emoji {emoji_id}, skipping storage")
-                minio_results.append((emoji_id, False))
+                    f"No image data for emoji {emoji_id}, skipping MinIO storage")
+                results.append((emoji_id, "", False))
                 continue
 
+            # Generate storage path
             storage_path = self._generate_storage_path(source, name)
+
+            # Try to store in MinIO with retry
             success = self._store_in_minio_with_retry(
                 emoji_id, name, source, image_data, storage_path
             )
-            minio_results.append((emoji_id, success))
 
-            if success:
-                source_emoji_data.append(
-                    {
-                        "id": int(emoji_id),
-                        "name": name,
-                        "image_path": storage_path,
-                        "source": source
-                    }
-                )
+            results.append((emoji_id, storage_path, success))
 
-        if source_emoji_data:
-            try:
-                self.source_emoji_repo.bulk_create_from_crawl_emojis(
-                    source_emoji_data)
-                logger.info(
-                    f"Created {len(source_emoji_data)} source emoji records in bulk"
-                )
-            except Exception as e:
-                logger.error(
-                    f"Failed to bulk create source emoji records: {e}")
-                # Mark all as failed if bulk insert fails
-                return [(emoji_id, False) for emoji_id, _ in minio_results]
-
-        return minio_results
+        return results
 
     @retry(
         max_attempts=DEFAULT_MAX_RETRIES,
@@ -207,11 +184,13 @@ class StorageStage(BaseStage[DataFrame, DataFrame]):
                 "emoji_source": source
             }
 
+            # Convert to BytesIO if needed
             if isinstance(image_data, (bytes, bytearray)):
                 image_bytes = BytesIO(image_data)
             else:
                 image_bytes = image_data
 
+            # Store in MinIO
             minio_uri = self.minio_client.store(
                 data=image_bytes, key=storage_path, metadata=metadata
             )
@@ -221,6 +200,8 @@ class StorageStage(BaseStage[DataFrame, DataFrame]):
 
         except Exception as e:
             logger.error(f"Failed to store emoji {emoji_id} in MinIO: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
 
     def _detect_content_type(self, filename: str) -> str:
@@ -241,14 +222,14 @@ class StorageStage(BaseStage[DataFrame, DataFrame]):
             return "image/png"
 
     def _update_dataframe_with_storage_paths(
-        self, df: DataFrame, storage_results: List[Tuple[str, bool]]
+        self, df: DataFrame, storage_results: List[Tuple[str, str, bool]]
     ) -> DataFrame:
         """
         Update DataFrame with storage paths for successfully stored emojis.
 
         Args:
             df: Input DataFrame
-            storage_results: List of (emoji_id, success) tuples
+            storage_results: List of (emoji_id, storage_path, success) tuples
 
         Returns:
             Updated DataFrame
@@ -258,18 +239,9 @@ class StorageStage(BaseStage[DataFrame, DataFrame]):
         if "storage_path" not in df.columns:
             result_df = df.withColumn("storage_path", F.lit(None))
 
-        success_map = {emoji_id: success for emoji_id,
-                       success in storage_results}
-
-        emoji_rows = df.select("id", "name", "source").collect()
-
-        for row in emoji_rows:
-            emoji_id = row["id"]
-            if emoji_id in success_map and success_map[emoji_id]:
-                name = row["name"]
-                source = row["source"]
-                storage_path = self._generate_storage_path(source, name)
-
+        # Update storage paths for successful emojis
+        for emoji_id, storage_path, success in storage_results:
+            if success:
                 result_df = result_df.withColumn(
                     "storage_path",
                     F.when(F.col("id") == emoji_id, storage_path).otherwise(
@@ -329,17 +301,20 @@ class StorageStage(BaseStage[DataFrame, DataFrame]):
         """
         super()._handle_error(error, input_data, context)
 
-        # Set failed emoji IDs for status update stage
-        all_emoji_ids = context.get("all_emoji_ids", [])
-        successful_ids = context.get("successful_emoji_ids", [])
+        import traceback
+        logger.error(f"Error in MinIO storage stage: {error}")
+        logger.error(traceback.format_exc())
 
-        # Calculate failed IDs
+        # Set failed emoji IDs for context
+        all_emoji_ids = context.get("all_emoji_ids", [])
+        successful_ids = context.get("minio_stored_emoji_ids", [])
+
         failed_ids = [
             emoji_id for emoji_id in all_emoji_ids if emoji_id not in successful_ids
         ]
 
-        # Store in context for status update stage
-        context.set("failed_emoji_ids", failed_ids)
+        context.set("minio_failed_emoji_ids", failed_ids)
 
         logger.error(
-            f"Storage stage failed, marked {len(failed_ids)} emojis as failed")
+            f"MinIO storage stage failed, marked {len(failed_ids)} emojis as failed"
+        )

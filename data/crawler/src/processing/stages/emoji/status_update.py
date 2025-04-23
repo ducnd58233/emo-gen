@@ -1,3 +1,4 @@
+from core.decorator import timer
 from core.logger import get_logger
 from processing.interface import PipelineContext
 from processing.stages.base import BaseStage
@@ -9,55 +10,96 @@ logger = get_logger("processing.stages.emoji.status_update")
 
 
 class FinalStatusUpdateStage(BaseStage[DataFrame, DataFrame]):
-    """Final stage to ensure all emoji statuses are updated correctly"""
+    """Final stage to update emoji statuses based on processing results"""
 
     def __init__(self, emoji_repo=None):
         super().__init__("final_status_update")
         self.emoji_repo = emoji_repo or CrawlEmojiRepository()
 
+    @timer(name="Final Status Update Process")
     def _process_impl(self, input_df: DataFrame, context: PipelineContext) -> DataFrame:
-        """Ensure all emoji statuses are properly updated after pipeline execution"""
+        """
+        Update emoji statuses based on processing results in the pipeline.
+
+        Emojis are marked as PROCESSED only if they were successfully:
+        1. Downloaded
+        2. Stored in MinIO
+        3. Metadata stored in database
+
+        Otherwise, they are marked as FAILED.
+
+        Args:
+            input_df: Input DataFrame
+            context: Pipeline context with processing results
+
+        Returns:
+            Input DataFrame (unchanged)
+        """
+        # Get all emoji IDs from context
         all_emoji_ids = context.get("all_emoji_ids", [])
         if not all_emoji_ids:
-            logger.warning("No emoji IDs found in context, skipping status update")
+            logger.warning(
+                "No emoji IDs found in context, skipping status update")
             return input_df
 
-        stored_emoji_ids = set(context.get("successful_emoji_ids", []))
-        emoji_ids_to_process = []
-        emoji_ids_to_fail = []
+        successful_ids = set(context.get("successful_emoji_ids", []))
 
-        for emoji_id in all_emoji_ids:
-            if emoji_id in stored_emoji_ids:
-                emoji_ids_to_process.append(emoji_id)
-            else:
-                emoji_ids_to_fail.append(emoji_id)
+        logger.info(
+            f"Processing status updates for {len(all_emoji_ids)} emojis")
+        logger.info(f"Successfully processed emojis: {len(successful_ids)}")
 
-        update_count = self._update_emoji_statuses(
-            emoji_ids_to_process, emoji_ids_to_fail
-        )
-        logger.info(f"Final status update complete: {update_count} emojis updated")
+        process_ids = list(successful_ids)
+        fail_ids = [id for id in all_emoji_ids if id not in successful_ids]
+
+        if fail_ids:
+            minio_failed = set(context.get("minio_failed_emoji_ids", []))
+            metadata_failed = set(context.get("metadata_failed_emoji_ids", []))
+            download_failed = set(context.get("failed_emoji_ids", []))
+
+            logger.info(f"Failed emojis breakdown:")
+            logger.info(f"- Download failures: {len(download_failed)}")
+            logger.info(f"- MinIO storage failures: {len(minio_failed)}")
+            logger.info(f"- Metadata storage failures: {len(metadata_failed)}")
+
+        # Update database statuses
+        self._update_emoji_statuses(process_ids, fail_ids)
+
+        logger.info(
+            f"Final status update complete: {len(process_ids)} processed, {len(fail_ids)} failed")
         return input_df
 
     def _update_emoji_statuses(self, process_ids, fail_ids):
-        """Update emoji statuses in bulk and return count of updated records"""
-        update_count = 0
-
+        """Update emoji statuses in database"""
         if process_ids:
             try:
-                self.emoji_repo.update_status_bulk(process_ids, Status.PROCESSED)
-                logger.info(
-                    f"Final update: marked {len(process_ids)} emojis as PROCESSED"
-                )
-                update_count += len(process_ids)
+                self.emoji_repo.update_status_bulk(
+                    process_ids, Status.PROCESSED)
+                logger.info(f"Marked {len(process_ids)} emojis as PROCESSED")
             except Exception as e:
                 logger.error(f"Error updating PROCESSED status: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
 
         if fail_ids:
             try:
                 self.emoji_repo.update_status_bulk(fail_ids, Status.FAILED)
-                logger.info(f"Final update: marked {len(fail_ids)} emojis as FAILED")
-                update_count += len(fail_ids)
+                logger.info(f"Marked {len(fail_ids)} emojis as FAILED")
             except Exception as e:
                 logger.error(f"Error updating FAILED status: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
 
-        return update_count
+    def _handle_error(self, error: Exception, input_data: DataFrame, context: PipelineContext) -> None:
+        """Mark all emojis as failed if the status update stage itself encounters an error"""
+        super()._handle_error(error, input_data, context)
+
+        all_emoji_ids = context.get("all_emoji_ids", [])
+        if all_emoji_ids:
+            try:
+                self.emoji_repo.update_status_bulk(
+                    all_emoji_ids, Status.FAILED)
+                logger.error(
+                    f"Status update stage failed, marked all {len(all_emoji_ids)} emojis as FAILED")
+            except Exception as e:
+                logger.error(
+                    f"Error marking emojis as failed after stage error: {e}")
