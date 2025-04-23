@@ -35,12 +35,12 @@ class DiscordEmojiCrawler(ICrawler):
         batch_size: int = 20,
         max_pages: int = 1000,
     ):
-        super().__init__(max_workers=max_workers, batch_size=batch_size)
+        super().__init__(
+            max_workers=max_workers, batch_size=batch_size, max_pages=max_pages
+        )
         self.headless = headless
         self.driver = None
         self.initialize_driver()
-
-        self.max_pages = max_pages
         self.repo = CrawlEmojiRepository()
         self.producer = KafkaMessageProducer()
 
@@ -201,6 +201,13 @@ class DiscordEmojiCrawler(ICrawler):
             logger.error(traceback.format_exc())
             return []
 
+    def should_stop_on_empty_page(self) -> bool:
+        """
+        Stop pagination when we encounter an empty page.
+        For Discord, once a page has no emojis, further pages will also be empty.
+        """
+        return True
+
     def cleanup(self):
         """Clean up resources"""
         if hasattr(self, "driver") and self.driver:
@@ -211,83 +218,3 @@ class DiscordEmojiCrawler(ICrawler):
                 logger.error(f"Error closing WebDriver: {e}")
 
         super().cleanup()
-
-    def crawl(self, url: str) -> List[Dict[str, Any]]:
-        """
-        Template method defining the crawling workflow with simplified pagination.
-        Generates URLs for pages 1 to max_pages and stops when a page has no emojis.
-        """
-        logger.info(f"Starting crawl from {url}")
-        all_results = []
-
-        try:
-            # Step 1: Discover sources to crawl
-            sources = self.discover_sources(url)
-
-            if not sources:
-                logger.warning(f"No sources discovered from {url}")
-                return []
-
-            logger.info(f"Discovered {len(sources)} topics/sources to process")
-
-            # Step 2: Process each source (topic)
-            for source_url in sources:
-                logger.info(f"Processing source: {source_url}")
-
-                # Step 2a: Get all pagination URLs for this source
-                pagination_urls = self.get_pagination_urls(source_url)
-
-                if not pagination_urls:
-                    # If no pagination detected, process as single page
-                    pagination_urls = [source_url]
-
-                logger.info(
-                    f"Generated {len(pagination_urls)} pages for source {source_url}"
-                )
-
-                # Step 2b: Process each page
-                empty_page_found = False
-                for page_url in pagination_urls:
-                    if self.is_processed(page_url):
-                        logger.info(f"Skipping already processed page: {page_url}")
-                        continue
-
-                    # Extract items from this page
-                    page_results = self.extract_items(page_url)
-
-                    # If page is empty, stop processing this topic
-                    if not page_results:
-                        logger.info(
-                            f"Empty page found at {page_url}, stopping pagination for this topic"
-                        )
-                        empty_page_found = True
-                        break
-
-                    # Process emojis in batches
-                    for i in range(0, len(page_results), self.batch_size):
-                        batch = page_results[i : i + self.batch_size]
-                        processed_batch = self.post_process(batch)
-                        all_results.extend(processed_batch)
-
-                    logger.info(f"Processed {len(page_results)} emojis from {page_url}")
-
-                if empty_page_found:
-                    logger.info(
-                        f"Completed crawling topic {source_url} due to empty page"
-                    )
-                else:
-                    logger.info(f"Completed crawling all pages for topic {source_url}")
-
-            logger.info(
-                f"Crawl completed, processed {len(self.processed_urls)} URLs, found {len(all_results)} emojis"
-            )
-            return all_results
-
-        except Exception as e:
-            logger.error(f"Error during crawl: {e}")
-            import traceback
-
-            logger.error(traceback.format_exc())
-            return all_results
-        finally:
-            self.cleanup()
