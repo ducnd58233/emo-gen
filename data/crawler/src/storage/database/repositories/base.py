@@ -1,17 +1,17 @@
-from typing import Generic, TypeVar, Optional, List, Dict, Any, Type
 from contextlib import contextmanager
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import select, func, Enum
-from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
 
 from core.logger import get_logger
-from storage.database.models.base import Base
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 from storage.database.client import SessionLocal
+from storage.database.models.base import Base
 
 logger = get_logger("storage.database.repositories.base")
 
-T = TypeVar('T', bound=Base)
+T = TypeVar("T", bound=Base)
 
 MAX_BATCH_SIZE = 20
 
@@ -59,15 +59,17 @@ class Repository(Generic[T]):
                 db.commit()
                 db.refresh(obj)
                 logger.info(
-                    f"{self.model_class.__name__} created: {getattr(obj, 'id', 'unknown')}")
+                    f"{self.model_class.__name__} created: {getattr(obj, 'id', 'unknown')}"
+                )
                 return obj
             except Exception as e:
                 db.rollback()
-                logger.error(
-                    f"Error creating {self.model_class.__name__}: {e}")
+                logger.error(f"Error creating {self.model_class.__name__}: {e}")
                 raise
 
-    def bulk_create(self, objects: List[T], session: Optional[Session] = None) -> List[T]:
+    def bulk_create(
+        self, objects: List[T], session: Optional[Session] = None
+    ) -> List[T]:
         """Create multiple records efficiently"""
         if not objects:
             return []
@@ -75,19 +77,20 @@ class Repository(Generic[T]):
         with self.get_session(session) as db:
             try:
                 for i in range(0, len(objects), MAX_BATCH_SIZE):
-                    batch = objects[i:i+MAX_BATCH_SIZE]
+                    batch = objects[i : i + MAX_BATCH_SIZE]
                     db.bulk_save_objects(batch)
                     db.commit()
                     db.flush()
                     logger.info(
-                        f"Bulk created {len(batch)} {self.model_class.__name__} records (batch {i//MAX_BATCH_SIZE + 1})")
+                        f"Bulk created {len(batch)} {self.model_class.__name__} records (batch {i//MAX_BATCH_SIZE + 1})"
+                    )
                 logger.info(
-                    f"Bulk created {len(objects)} {self.model_class.__name__} records")
+                    f"Bulk created {len(objects)} {self.model_class.__name__} records"
+                )
                 return objects
             except Exception as e:
                 db.rollback()
-                logger.error(
-                    f"Error bulk creating {self.model_class.__name__}: {e}")
+                logger.error(f"Error bulk creating {self.model_class.__name__}: {e}")
                 raise
 
     def _object_to_dict(self, obj: T) -> Dict[str, Any]:
@@ -102,7 +105,7 @@ class Repository(Generic[T]):
         """
         obj_dict = {}
         for c in obj.__table__.columns:
-            if c.primary_key or c.name in ('created_at', 'updated_at'):
+            if c.primary_key or c.name in ("created_at", "updated_at"):
                 continue
             value = getattr(obj, c.name)
 
@@ -110,7 +113,12 @@ class Repository(Generic[T]):
             obj_dict[c.name] = value
         return obj_dict
 
-    def bulk_upsert(self, objects: List[T], unique_fields: Optional[List[str]] = None, session: Optional[Session] = None) -> List[T]:
+    def bulk_upsert(
+        self,
+        objects: List[T],
+        unique_fields: Optional[List[str]] = None,
+        session: Optional[Session] = None,
+    ) -> List[T]:
         """
         Perform batch upsert with a generic approach that works across all SQL dialects
 
@@ -148,27 +156,29 @@ class Repository(Generic[T]):
 
         # Process in batches
         for i in range(0, len(deduplicated_objects), MAX_BATCH_SIZE):
-            batch = deduplicated_objects[i:i+MAX_BATCH_SIZE]
+            batch = deduplicated_objects[i : i + MAX_BATCH_SIZE]
 
             with self.get_session(session) as db:
                 try:
-                    object_dicts = [self._object_to_dict(
-                        obj) for obj in batch]
+                    object_dicts = [self._object_to_dict(obj) for obj in batch]
 
                     # Create insert statement
-                    insert_stmt = insert(
-                        self.model_class.__table__).values(object_dicts)
+                    insert_stmt = insert(self.model_class.__table__).values(
+                        object_dicts
+                    )
 
                     # Create upsert statement with returning clause
                     upsert_stmt = insert_stmt.on_conflict_do_update(
                         index_elements=unique_fields,
                         set_={
-                            **{col.name: insert_stmt.excluded[col.name]
-                               for col in self.model_class.__table__.columns
-                               if col.name not in unique_fields + ['created_at', 'updated_at']
-                               },
-                            'updated_at': func.current_timestamp()
-                        }
+                            **{
+                                col.name: insert_stmt.excluded[col.name]
+                                for col in self.model_class.__table__.columns
+                                if col.name
+                                not in unique_fields + ["created_at", "updated_at"]
+                            },
+                            "updated_at": func.current_timestamp(),
+                        },
                     ).returning(self.model_class.__table__)
 
                     # Execute and get results
@@ -177,18 +187,20 @@ class Repository(Generic[T]):
 
                     # Convert result rows to model objects
                     result_rows = result.mappings().all()
-                    batch_results = [self.model_class(
-                        **row) for row in result_rows]
+                    batch_results = [self.model_class(**row) for row in result_rows]
                     all_results.extend(batch_results)
 
                     logger.info(
-                        f"Upserted {len(batch_results)} {self.model_class.__name__} records (batch {i//MAX_BATCH_SIZE + 1})")
+                        f"Upserted {len(batch_results)} {self.model_class.__name__} records (batch {i//MAX_BATCH_SIZE + 1})"
+                    )
 
                 except Exception as e:
                     db.rollback()
                     logger.error(
-                        f"Error batch upserting {self.model_class.__name__}: {e}")
+                        f"Error batch upserting {self.model_class.__name__}: {e}"
+                    )
                     import traceback
+
                     logger.error(f"Error details: {traceback.format_exc()}")
                     raise
 
@@ -199,12 +211,14 @@ class Repository(Generic[T]):
         with self.get_session(session) as db:
             return db.query(self.model_class).filter(self.model_class.id == id).first()
 
-    def get_many(self,
-                 limit: int = 100,
-                 offset: int = 0,
-                 filters: Optional[Dict[str, Any]] = None,
-                 order_by: Optional[str] = None,
-                 session: Optional[Session] = None) -> List[T]:
+    def get_many(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        filters: Optional[Dict[str, Any]] = None,
+        order_by: Optional[str] = None,
+        session: Optional[Session] = None,
+    ) -> List[T]:
         """
         Get multiple records with pagination, filtering and ordering
 
@@ -224,22 +238,24 @@ class Repository(Generic[T]):
             # Apply filters
             if filters:
                 for field, value in filters.items():
-                    query = query.filter(
-                        getattr(self.model_class, field) == value)
+                    query = query.filter(getattr(self.model_class, field) == value)
 
             # Apply ordering
             if order_by:
-                if order_by.startswith('-'):
+                if order_by.startswith("-"):
                     field = order_by[1:]
-                    query = query.order_by(
-                        getattr(self.model_class, field).desc())
+                    query = query.order_by(getattr(self.model_class, field).desc())
                 else:
                     query = query.order_by(getattr(self.model_class, field))
 
             # Apply pagination
             return query.offset(offset).limit(limit).all()
 
-    def count(self, filters: Optional[Dict[str, Any]] = None, session: Optional[Session] = None) -> int:
+    def count(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        session: Optional[Session] = None,
+    ) -> int:
         """
         Count records with optional filtering
 
@@ -256,12 +272,13 @@ class Repository(Generic[T]):
             # Apply filters
             if filters:
                 for field, value in filters.items():
-                    query = query.where(
-                        getattr(self.model_class, field) == value)
+                    query = query.where(getattr(self.model_class, field) == value)
 
             return db.scalar(query)
 
-    def update(self, id: int, updates: Dict[str, Any], session: Optional[Session] = None) -> Optional[T]:
+    def update(
+        self, id: int, updates: Dict[str, Any], session: Optional[Session] = None
+    ) -> Optional[T]:
         """
         Update a record by id
 
@@ -274,14 +291,12 @@ class Repository(Generic[T]):
             Updated model object or None if not found
         """
         with self.get_session(session) as db:
-            obj = db.query(self.model_class).filter(
-                self.model_class.id == id).first()
+            obj = db.query(self.model_class).filter(self.model_class.id == id).first()
             if obj:
                 for key, value in updates.items():
                     setattr(obj, key, value)
                 db.commit()
-                logger.info(
-                    f"Updated {self.model_class.__name__} with id {id}")
+                logger.info(f"Updated {self.model_class.__name__} with id {id}")
                 return obj
             return None
 
@@ -297,12 +312,10 @@ class Repository(Generic[T]):
             True if deleted, False if not found
         """
         with self.get_session(session) as db:
-            obj = db.query(self.model_class).filter(
-                self.model_class.id == id).first()
+            obj = db.query(self.model_class).filter(self.model_class.id == id).first()
             if obj:
                 db.delete(obj)
                 db.commit()
-                logger.info(
-                    f"Deleted {self.model_class.__name__} with id {id}")
+                logger.info(f"Deleted {self.model_class.__name__} with id {id}")
                 return True
             return False

@@ -5,7 +5,7 @@ from extraction.sources.discord import DiscordEmojiCrawler
 class CrawlerFactory:
     @staticmethod
     def create_crawler(source: str, **kwargs) -> ICrawler:
-        if source == 'discord':
+        if source == "discord":
             return DiscordEmojiCrawler(**kwargs)
         else:
-            raise ValueError(f'Invalid source: {source}')
+            raise ValueError(f"Invalid source: {source}")

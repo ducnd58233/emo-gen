@@ -1,8 +1,7 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Set
 from collections import deque
-from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Dict, List
 
 from core.logger import get_logger
 
@@ -16,7 +15,9 @@ class ICrawler(ABC):
     DEFAULT_BATCH_SIZE = 100
     DEFAULT_MAX_PAGES = 1000
 
-    def __init__(self, max_workers: int = 4, batch_size: int = None, max_pages: int = None):
+    def __init__(
+        self, max_workers: int = 4, batch_size: int = None, max_pages: int = None
+    ):
         self.max_workers = max_workers
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.results_queue = deque()
@@ -65,13 +66,13 @@ class ICrawler(ABC):
                     pagination_urls = [source_url]
 
                 logger.info(
-                    f"Found {len(pagination_urls)} pages for source {source_url}")
+                    f"Found {len(pagination_urls)} pages for source {source_url}"
+                )
 
                 # Step 2b: Process each page
                 for page_url in pagination_urls:
                     if self.is_processed(page_url):
-                        logger.info(
-                            f"Skipping already processed page: {page_url}")
+                        logger.info(f"Skipping already processed page: {page_url}")
                         continue
 
                     # Extract items from this page
@@ -84,17 +85,17 @@ class ICrawler(ABC):
                     if page_results:
                         # Process in batches for efficiency
                         for i in range(0, len(page_results), self.batch_size):
-                            batch = page_results[i:i+self.batch_size]
+                            batch = page_results[i : i + self.batch_size]
                             processed_batch = self.post_process(batch)
                             all_results.extend(processed_batch)
 
-            logger.info(
-                f"Crawl completed, processed {len(self.processed_urls)} URLs")
+            logger.info(f"Crawl completed, processed {len(self.processed_urls)} URLs")
             return all_results
 
         except Exception as e:
             logger.error(f"Error during crawl: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             return all_results
         finally:
@@ -127,8 +128,9 @@ class ICrawler(ABC):
 
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # Submit all URLs for processing
-            future_to_url = {executor.submit(
-                self.extract_items, url): url for url in urls}
+            future_to_url = {
+                executor.submit(self.extract_items, url): url for url in urls
+            }
 
             # Collect results as they complete
             for future in as_completed(future_to_url):
@@ -167,12 +169,10 @@ class ICrawler(ABC):
     @abstractmethod
     def fetch(self, url: str) -> str:
         """Fetch raw content from the given URL."""
-        pass
 
     @abstractmethod
     def extract_items(self, url: str) -> List[Dict[str, Any]]:
         """Extract items from a specific URL."""
-        pass
 
     def discover_sources(self, url: str) -> List[str]:
         """
@@ -195,7 +195,7 @@ class ICrawler(ABC):
         Clean up resources.
         Called when crawling is complete or when an error occurs.
         """
-        if hasattr(self, 'executor'):
+        if hasattr(self, "executor"):
             self.executor.shutdown(wait=False)
 
     def __del__(self):

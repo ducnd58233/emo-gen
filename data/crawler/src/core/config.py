@@ -1,10 +1,10 @@
-import os
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict
 
 from dotenv import load_dotenv
-from pydantic import PostgresDsn, Field, field_validator
+from pydantic import Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -21,9 +21,7 @@ class DatabaseSettings(BaseSettings):
     name: str = Field(default="emogen")
 
     model_config = SettingsConfigDict(
-        env_prefix="DB_",
-        case_sensitive=False,
-        extra="ignore"
+        env_prefix="DB_", case_sensitive=False, extra="ignore"
     )
 
     @property
@@ -37,9 +35,7 @@ class KafkaSettings(BaseSettings):
     group_id: str = Field(default="emogen-crawler-group")
 
     model_config = SettingsConfigDict(
-        env_prefix="KAFKA_",
-        case_sensitive=False,
-        extra="ignore"
+        env_prefix="KAFKA_", case_sensitive=False, extra="ignore"
     )
 
 
@@ -51,9 +47,7 @@ class MinioSettings(BaseSettings):
     secure: bool = Field(default=False)
 
     model_config = SettingsConfigDict(
-        env_prefix="MINIO_",
-        case_sensitive=False,
-        extra="ignore"
+        env_prefix="MINIO_", case_sensitive=False, extra="ignore"
     )
 
 
@@ -64,9 +58,7 @@ class CrawlerSettings(BaseSettings):
     sleep_time: int = Field(default=5)
 
     model_config = SettingsConfigDict(
-        env_prefix="CRAWLER_",
-        case_sensitive=False,
-        extra="ignore"
+        env_prefix="CRAWLER_", case_sensitive=False, extra="ignore"
     )
 
 
@@ -76,9 +68,7 @@ class SparkSettings(BaseSettings):
     configs: Dict[str, Any] = Field(default_factory=dict)
 
     model_config = SettingsConfigDict(
-        env_prefix="SPARK_",
-        case_sensitive=False,
-        extra="ignore"
+        env_prefix="SPARK_", case_sensitive=False, extra="ignore"
     )
 
     @field_validator("configs", mode="before")
@@ -93,7 +83,8 @@ class SparkSettings(BaseSettings):
             return json.loads(v)
         except (json.JSONDecodeError, TypeError):
             print(
-                f"Warning: Could not parse SPARK_CONFIGS as JSON. Using empty dict instead. Value: {v}")
+                f"Warning: Could not parse SPARK_CONFIGS as JSON. Using empty dict instead. Value: {v}"
+            )
             return {}
 
 
@@ -105,9 +96,7 @@ class Settings(BaseSettings):
     spark: SparkSettings = Field(default_factory=SparkSettings)
 
     model_config = SettingsConfigDict(
-        env_file=env_file_path,
-        env_file_encoding="utf-8",
-        extra="ignore"
+        env_file=env_file_path, env_file_encoding="utf-8", extra="ignore"
     )
 
 

@@ -1,21 +1,46 @@
 repos:
   - repo: local
+    defaults:
+      files: &src-files ^src/
+      exclude: &std-exclude (__pycache__|__init__.py|\.git|\.venv|\.env|\.idea|data/datastorage)
     hooks:
+      - id: autoflake
+        name: autoflake
+        entry: autoflake
+        language: system
+        types: [python]
+        args: [
+          --remove-all-unused-imports,
+          --remove-unused-variables,
+          --in-place,
+          --recursive,
+        ]
+        files: *src-files
+        exclude: *std-exclude
+      
       - id: black
         name: black
         entry: black
         language: system
         types: [python]
         require_serial: true
-      - id: reorder-python-imports
-        name: Reorder python imports
-        entry: reorder-python-imports
+        files: *src-files
+        exclude: *std-exclude
+      
+      - id: isort
+        name: isort
+        entry: isort
         language: system
         types: [python]
-        args: [--application-directories=src]
+        args: [--profile=black, --combine-as]
+        files: *src-files
+        exclude: *std-exclude
+      
       - id: trailing-whitespace
         name: Trim Trailing Whitespace
         entry: trailing-whitespace-fixer
         language: system
-        types: [text]
-        stages: [commit, push, manual]
+        types: [python]
+        stages: [pre-commit, pre-push, manual]
+        files: *src-files
+        exclude: *std-exclude 

@@ -1,8 +1,9 @@
 from typing import Optional
-from pyspark.sql import SparkSession
-from core.logger import get_logger
+
 from core.config import config
 from core.decorator import singleton
+from core.logger import get_logger
+from pyspark.sql import SparkSession
 
 logger = get_logger("processing.spark.session")
 
@@ -10,6 +11,7 @@ logger = get_logger("processing.spark.session")
 @singleton
 class SparkSessionManager:
     """Singleton manager for SparkSession"""
+
     _session: Optional[SparkSession] = None
 
     @property
@@ -35,18 +37,15 @@ class SparkSessionManager:
             # Increase timeout and retry settings
             "spark.network.timeout": "800s",
             "spark.executor.heartbeatInterval": "60s",
-
             # Memory settings to prevent OOM errors
             "spark.driver.memory": "2g",
             "spark.executor.memory": "2g",
-
             # Improve Py4J stability
             "spark.python.worker.reuse": "true",
             "spark.python.profile": "false",
-
             # GC settings
             "spark.eventLog.gcMetrics.youngGenerationGarbageCollectors": "G1 Young Generation",
-            "spark.eventLog.gcMetrics.oldGenerationGarbageCollectors": "G1 Old Generation"
+            "spark.eventLog.gcMetrics.oldGenerationGarbageCollectors": "G1 Old Generation",
         }
 
         for key, value in connection_configs.items():

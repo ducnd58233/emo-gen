@@ -1,9 +1,9 @@
-from typing import List, Callable
 import json
-import threading
-from kafka import KafkaConsumer
-from core.logger import get_logger
+from typing import Callable, List
+
 from core.config import config
+from core.logger import get_logger
+from kafka import KafkaConsumer
 from messaging.interface import Consumer
 from messaging.schema import Message
 
@@ -15,14 +15,15 @@ class KafkaMessageConsumer(Consumer):
         self.consumer = KafkaConsumer(
             bootstrap_servers=config.kafka.bootstrap_servers,
             group_id=group_id,
-            auto_offset_reset='earliest',
-            value_deserializer=lambda x: json.loads(x.decode('utf-8')),
+            auto_offset_reset="earliest",
+            value_deserializer=lambda x: json.loads(x.decode("utf-8")),
             enable_auto_commit=True,
-            consumer_timeout_ms=1000  # 1 second timeout for polling
+            consumer_timeout_ms=1000,  # 1 second timeout for polling
         )
         self._running = False
         logger.info(
-            f"Kafka consumer initialized: {config.kafka.bootstrap_servers}, group: {group_id}")
+            f"Kafka consumer initialized: {config.kafka.bootstrap_servers}, group: {group_id}"
+        )
 
     def consume(self, topic: str) -> Message:
         """Consume a single message from a topic"""
@@ -46,8 +47,7 @@ class KafkaMessageConsumer(Consumer):
                 for topic_partition, messages in records.items():
                     for kafka_message in messages:
                         try:
-                            message = Message.model_validate(
-                                kafka_message.value)
+                            message = Message.model_validate(kafka_message.value)
                             callback(message)
                         except Exception as e:
                             logger.error(f"Error processing message: {e}")

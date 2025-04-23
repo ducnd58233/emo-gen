@@ -5,6 +5,7 @@ services:
   postgres:
     image: postgres:17-alpine
     container_name: emogen-crawler-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -17,6 +18,7 @@ services:
   zookeeper:
     image: confluentinc/cp-zookeeper:latest
     container_name: emogen-crawler-zookeeper
+    restart: unless-stopped
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
     ports:
@@ -25,6 +27,7 @@ services:
   kafka:
     image: confluentinc/cp-kafka:latest
     container_name: emogen-crawler-kafka
+    restart: unless-stopped
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
@@ -42,6 +45,7 @@ services:
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
     container_name: emogen-crawler-kafka-ui
+    restart: unless-stopped
     environment:
       KAFKA_CLUSTERS_0_NAME: emogen-cluster
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
@@ -54,6 +58,7 @@ services:
   minio:
     image: minio/minio:latest
     container_name: emogen-crawler-minio
+    restart: unless-stopped
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -67,6 +72,7 @@ services:
   spark-master:
     image: bitnami/spark:latest
     container_name: emogen-crawler-spark-master
+    restart: unless-stopped
     environment:
       - SPARK_MODE=master
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
@@ -88,6 +94,7 @@ services:
   spark-worker:
     image: bitnami/spark:latest
     container_name: emogen-crawler-spark-worker
+    restart: unless-stopped
     environment:
       - SPARK_MODE=worker
       - SPARK_MASTER_URL=spark://spark-master:7077

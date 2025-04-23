@@ -1,13 +1,11 @@
-from datetime import timedelta
 import io
-from typing import BinaryIO, Dict, List, Optional, Union
-from minio import Minio
-from minio.error import S3Error
-from urllib3.exceptions import MaxRetryError
-
+from datetime import timedelta
 from logging import getLogger
+from typing import BinaryIO, Dict, List, Optional, Union
+
 from core.config import config
 from core.decorator import retry, timer
+from minio import Minio
 
 logger = getLogger("storage.minio.client")
 
@@ -44,8 +42,9 @@ class MinioClient:
 
     @property
     def client(self) -> Minio:
-        """Lazy initialization of MinIO client"""
-        if not self._client:
+        """Get or create the Minio client"""
+        if self._client is None:
+            logger.info(f"Initializing MinIO client to {self.endpoint}")
             try:
                 self._client = Minio(
                     endpoint=self.endpoint,
@@ -53,12 +52,12 @@ class MinioClient:
                     secret_key=self.secret_key,
                     secure=self.secure,
                 )
-                # Initialize buckets if they don't exist
                 self._ensure_buckets_exist()
-                logger.info(f"Connected to MinIO at {self.endpoint}")
-            except (S3Error, MaxRetryError) as e:
-                logger.error(f"Failed to connect to MinIO: {e}")
+                logger.info("MinIO client initialized successfully")
+            except Exception as e:
+                logger.error(f"Failed to initialize MinIO client: {e}")
                 raise
+
         return self._client
 
     def _ensure_buckets_exist(self):
@@ -66,11 +65,13 @@ class MinioClient:
         for bucket_name in set(self.bucket_map.values()):
             try:
                 if not self.client.bucket_exists(bucket_name):
+                    logger.info(f"Creating bucket: {bucket_name}")
                     self.client.make_bucket(bucket_name)
-                    logger.info(f"Created bucket: {bucket_name}")
+                    logger.info(f"Successfully created bucket: {bucket_name}")
+                else:
+                    logger.info(f"Bucket already exists: {bucket_name}")
             except Exception as e:
-                logger.error(
-                    f"Error ensuring bucket {bucket_name} exists: {e}")
+                logger.error(f"Error ensuring bucket {bucket_name} exists: {e}")
 
     def _get_bucket_for_key(self, key: str) -> str:
         """Determine appropriate bucket based on key and content type"""
@@ -79,7 +80,6 @@ class MinioClient:
             if content_type in self.bucket_map:
                 return self.bucket_map[content_type]
 
-        # Default to 'other' bucket
         return self.bucket_map["other"]
 
     def _get_bucket_for_mime(self, mime_type: str) -> str:
@@ -87,8 +87,11 @@ class MinioClient:
         if mime_type:
             for prefix, bucket_type in self.mime_to_bucket.items():
                 if mime_type.startswith(prefix):
-                    return self.bucket_map[bucket_type]
+                    return bucket_type
 
+        logger.debug(
+            f"No bucket mapping found for MIME type: {mime_type}, using default bucket"
+        )
         return self.bucket_map["other"]
 
     def _normalize_key(self, key: str) -> str:
@@ -97,7 +100,12 @@ class MinioClient:
 
     @timer(name="Minio - Store object")
     @retry(max_attempts=3, delay=1, backoff=2, exceptions=(Exception,))
-    def store(self, data: Union[bytes, bytearray, BinaryIO], key: str, metadata: Optional[Dict] = None) -> str:
+    def store(
+        self,
+        data: Union[bytes, bytearray, BinaryIO],
+        key: str,
+        metadata: Optional[Dict] = None,
+    ) -> str:
         """
         Store data in MinIO
 
@@ -112,7 +120,7 @@ class MinioClient:
         try:
             key = self._normalize_key(key)
 
-            if not hasattr(data, 'seek') or not hasattr(data, 'read'):
+            if not hasattr(data, "seek") or not hasattr(data, "read"):
                 if isinstance(data, (bytes, bytearray)):
                     data = io.BytesIO(data)
                 else:
@@ -121,7 +129,8 @@ class MinioClient:
                     except Exception as e:
                         logger.error(f"Failed to convert data to BytesIO: {e}")
                         raise ValueError(
-                            f"Data must be bytes, bytearray, or a file-like object with seek method, got {type(data)}")
+                            f"Data must be bytes, bytearray, or a file-like object with seek method, got {type(data)}"
+                        )
 
             content_type = None
             if metadata and "content_type" in metadata:
@@ -133,15 +142,18 @@ class MinioClient:
                 else self._get_bucket_for_key(key)
             )
 
-            # Get file size - ensure we're at the beginning of the file
             try:
                 data.seek(0, io.SEEK_END)
                 size = data.tell()
                 data.seek(0)
             except Exception as e:
                 logger.error(f"Error getting file size: {e}")
-                raise ValueError(
-                    f"Could not determine size of data object: {e}")
+                raise ValueError(f"Could not determine size of data object: {e}")
+
+            # Ensure bucket exists before storing
+            if not self.client.bucket_exists(bucket):
+                logger.info(f"Bucket {bucket} doesn't exist, creating it")
+                self.client.make_bucket(bucket)
 
             # Upload to MinIO
             self.client.put_object(
@@ -159,6 +171,7 @@ class MinioClient:
         except Exception as e:
             logger.error(f"Error storing object with key '{key}': {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             raise
 
@@ -181,13 +194,16 @@ class MinioClient:
                 key = self._normalize_key(key)
                 bucket = self._get_bucket_for_key(key)
 
+            # Ensure bucket exists
+            if not self.client.bucket_exists(bucket):
+                raise ValueError(f"Bucket '{bucket}' does not exist")
+
             response = self.client.get_object(bucket, key)
             data = io.BytesIO(response.read())
             response.close()
             response.release_conn()
 
-            logger.info(
-                f"Retrieved object from bucket '{bucket}' with key '{key}'")
+            logger.info(f"Retrieved object from bucket '{bucket}' with key '{key}'")
             return data
 
         except Exception as e:
@@ -207,7 +223,6 @@ class MinioClient:
             True if successful
         """
         try:
-            # Parse bucket and key from URI if provided
             if key.startswith("minio://"):
                 _, bucket, key = key.split("/", 2)
             else:
@@ -215,11 +230,15 @@ class MinioClient:
                 key = self._normalize_key(key)
                 bucket = self._get_bucket_for_key(key)
 
+            # Ensure bucket exists
+            if not self.client.bucket_exists(bucket):
+                logger.warning(f"Bucket '{bucket}' does not exist, nothing to remove")
+                return False
+
             # Remove object
             self.client.remove_object(bucket, key)
 
-            logger.info(
-                f"Removed object from bucket '{bucket}' with key '{key}'")
+            logger.info(f"Removed object from bucket '{bucket}' with key '{key}'")
             return True
 
         except Exception as e:
@@ -242,21 +261,26 @@ class MinioClient:
             # If bucket is specified in prefix (minio://bucket/prefix)
             if prefix.startswith("minio://"):
                 _, bucket, prefix = prefix.split("/", 2)
-                objects = self.client.list_objects(
-                    bucket, prefix=prefix, recursive=True)
-                return [f"minio://{bucket}/{obj.object_name}" for obj in objects]
+                if self.client.bucket_exists(bucket):
+                    objects = self.client.list_objects(
+                        bucket, prefix=prefix, recursive=True
+                    )
+                    return [f"minio://{bucket}/{obj.object_name}" for obj in objects]
+                else:
+                    logger.warning(f"Bucket '{bucket}' does not exist")
+                    return []
 
-            # Otherwise list objects in all buckets with the prefix
             results = []
             for bucket in set(self.bucket_map.values()):
                 if self.client.bucket_exists(bucket):
                     objects = self.client.list_objects(
-                        bucket, prefix=prefix, recursive=True)
+                        bucket, prefix=prefix, recursive=True
+                    )
                     results.extend(
-                        [f"minio://{bucket}/{obj.object_name}" for obj in objects])
+                        [f"minio://{bucket}/{obj.object_name}" for obj in objects]
+                    )
 
-            logger.info(
-                f"Listed {len(results)} objects with prefix '{prefix}'")
+            logger.info(f"Listed {len(results)} objects with prefix '{prefix}'")
             return results
 
         except Exception as e:
@@ -277,23 +301,23 @@ class MinioClient:
             Presigned URL
         """
         try:
-            # Parse bucket and key from URI if provided
             if key.startswith("minio://"):
                 _, bucket, key = key.split("/", 2)
             else:
-                # Normalize key
                 key = self._normalize_key(key)
                 bucket = self._get_bucket_for_key(key)
 
+            # Ensure bucket exists
+            if not self.client.bucket_exists(bucket):
+                logger.warning(f"Bucket '{bucket}' does not exist, cannot generate URL")
+                return ""
+
             # Generate presigned URL
             url = self.client.presigned_get_object(
-                bucket_name=bucket,
-                object_name=key,
-                expires=timedelta(seconds=expires)
+                bucket_name=bucket, object_name=key, expires=timedelta(seconds=expires)
             )
 
-            logger.info(
-                f"Generated presigned URL for '{key}' (expires in {expires}s)")
+            logger.info(f"Generated presigned URL for '{key}' (expires in {expires}s)")
             return url
 
         except Exception as e:

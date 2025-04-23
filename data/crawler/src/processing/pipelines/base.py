@@ -1,12 +1,10 @@
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional
 
-from pyspark.sql import DataFrame
-
+from core.decorator import lazy_property, timer
 from core.logger import get_logger
-from core.decorator import timer, lazy_property
-from processing.spark.session import SparkSessionManager
 from processing.interface import Pipeline, PipelineContext, PipelineStage
-
+from processing.spark.session import SparkSessionManager
+from pyspark.sql import DataFrame
 
 logger = get_logger("processing.pipelines.base")
 
@@ -30,7 +28,7 @@ class SparkPipeline(Pipeline):
     def name(self) -> str:
         return self.pipeline_name
 
-    def add_stage(self, stage: PipelineStage) -> 'SparkPipeline':
+    def add_stage(self, stage: PipelineStage) -> "SparkPipeline":
         """Add a processing stage to the pipeline"""
         self.stages.append(stage)
         return self
@@ -40,7 +38,9 @@ class SparkPipeline(Pipeline):
         return self._stage_results.get(stage_name)
 
     @timer(name="Pipeline Execution")
-    def execute(self, input_data: Any, context: Optional[PipelineContext] = None) -> Any:
+    def execute(
+        self, input_data: Any, context: Optional[PipelineContext] = None
+    ) -> Any:
         """
         Template method for pipeline execution with the following phases:
         1. Pre-process - Prepare data and context
@@ -55,18 +55,17 @@ class SparkPipeline(Pipeline):
             # Phase 1: Pre-process
             self._stage_results = {}
             preprocessed_data = self._pre_process(input_data, context)
-            context.set('preprocessed_data', preprocessed_data)
+            context.set("preprocessed_data", preprocessed_data)
 
             # Phase 2: Execute stages
             current_data = preprocessed_data
             for i, stage in enumerate(self.stages):
                 stage_name = stage.name()
-                context.set('current_stage_index', i)
-                context.set('current_stage_name', stage_name)
+                context.set("current_stage_index", i)
+                context.set("current_stage_name", stage_name)
 
                 # Execute the stage and store result
-                logger.info(
-                    f"Executing stage {stage_name} ({i+1}/{len(self.stages)})")
+                logger.info(f"Executing stage {stage_name} ({i+1}/{len(self.stages)})")
                 current_data = stage.process(current_data, context)
                 self._stage_results[stage_name] = current_data
 
@@ -74,16 +73,14 @@ class SparkPipeline(Pipeline):
                 if isinstance(current_data, DataFrame):
                     current_data = current_data.cache()
                     row_count = current_data.count()
-                    context.set(f'stage_{i}_count', row_count)
-                    logger.info(
-                        f"Stage {stage_name} produced {row_count} rows")
+                    context.set(f"stage_{i}_count", row_count)
+                    logger.info(f"Stage {stage_name} produced {row_count} rows")
 
             # Phase 3: Post-process
             final_result = self._post_process(current_data, context)
-            context.set('final_result', final_result)
+            context.set("final_result", final_result)
 
-            logger.info(
-                f"Pipeline {self.pipeline_name} completed successfully")
+            logger.info(f"Pipeline {self.pipeline_name} completed successfully")
             return final_result
 
         except Exception as e:
@@ -96,7 +93,7 @@ class SparkPipeline(Pipeline):
 
     def _pre_process(self, input_data: Any, context: PipelineContext) -> Any:
         """Pre-process input data before running stages (can be overridden)"""
-        context.set('original_input', input_data)
+        context.set("original_input", input_data)
         return input_data
 
     def _post_process(self, result: Any, context: PipelineContext) -> Any:
@@ -106,10 +103,11 @@ class SparkPipeline(Pipeline):
     def _handle_error(self, error: Exception, context: PipelineContext) -> None:
         """Handle error during pipeline execution (can be overridden)"""
         import traceback
+
         error_trace = traceback.format_exc()
         logger.error(f"Pipeline error: {error_trace}")
-        context.set('pipeline_error', str(error))
-        context.set('pipeline_error_trace', error_trace)
+        context.set("pipeline_error", str(error))
+        context.set("pipeline_error_trace", error_trace)
 
     def _cleanup(self, context: PipelineContext) -> None:
         """Clean up resources after pipeline execution (can be overridden)"""

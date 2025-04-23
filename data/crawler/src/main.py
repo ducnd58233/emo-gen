@@ -1,9 +1,8 @@
 import signal
 import sys
-import threading
 
-from core.logger import get_logger
 from core.config import config
+from core.logger import get_logger
 from extraction.factory import CrawlerFactory
 from processing.manager import ProcessingManager
 from processing.spark.session import SparkSessionManager
@@ -29,22 +28,18 @@ def main():
         processing_manager = ProcessingManager(
             topic=config.kafka.emoji_topic,
             pipeline_type="emoji",
-            group_id=config.kafka.group_id
+            group_id=config.kafka.group_id,
         )
 
-        # Start processing in a non-blocking way (will be implemented in ProcessingManager)
         processing_manager.start(non_blocking=True)
 
         # Initialize crawler with sensible defaults from config
         crawler = CrawlerFactory.create_crawler(
-            source="discord",
-            headless=config.crawler.headless,
-            max_workers=4
+            source="discord", headless=config.crawler.headless, max_workers=4
         )
 
         # Start crawling
-        logger.info(
-            f"Starting crawler for discord at {crawler.ROOT_URL}emoji-list")
+        logger.info(f"Starting crawler for discord at {crawler.ROOT_URL}emoji-list")
         results = crawler.crawl(f"{crawler.ROOT_URL}emoji-list")
         logger.info(f"Crawling completed. Found {len(results)} emojis.")
 
@@ -53,10 +48,11 @@ def main():
     except Exception as e:
         logger.error(f"Error in main loop: {e}")
         import traceback
+
         logger.error(traceback.format_exc())
     finally:
         # Clean up resources
-        if 'processing_manager' in locals():
+        if "processing_manager" in locals():
             processing_manager.stop()
         SparkSessionManager().stop()
         logger.info("Shutdown complete")

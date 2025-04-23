@@ -39,16 +39,15 @@ class Pipeline(ABC):
     """Abstract base class for pipelines"""
 
     @abstractmethod
-    def add_stage(self, stage: PipelineStage) -> 'Pipeline':
+    def add_stage(self, stage: PipelineStage) -> "Pipeline":
         """Add a stage to the pipeline"""
-        pass
 
     @abstractmethod
-    def execute(self, input_data: Any, context: Optional[PipelineContext] = None) -> Any:
+    def execute(
+        self, input_data: Any, context: Optional[PipelineContext] = None
+    ) -> Any:
         """Execute pipeline on input data"""
-        pass
 
     @abstractmethod
     def name(self) -> str:
         """Return name of this pipeline"""
-        pass

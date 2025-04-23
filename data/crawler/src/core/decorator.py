@@ -1,12 +1,13 @@
+import inspect
 import time
 from functools import wraps
 from threading import Lock
-from typing import Any, Callable, Optional, TypeVar, cast, Dict, List
-from core.logger import get_logger
-import inspect
+from typing import Any, Callable, Dict, Optional, TypeVar, cast
 
-T = TypeVar('T')
-F = TypeVar('F', bound=Callable[..., Any])
+from core.logger import get_logger
+
+T = TypeVar("T")
+F = TypeVar("F", bound=Callable[..., Any])
 
 logger = get_logger("core.decorator")
 
@@ -32,7 +33,9 @@ def singleton(cls):
     return cls
 
 
-def timer(func: Optional[F] = None, *, log_level: str = "info", name: Optional[str] = None) -> Any:
+def timer(
+    func: Optional[F] = None, *, log_level: str = "info", name: Optional[str] = None
+) -> Any:
     """
     Decorator to measure and log execution time of a function
 
@@ -52,6 +55,7 @@ def timer(func: Optional[F] = None, *, log_level: str = "info", name: Optional[s
             # Custom log level and operation name
             pass
     """
+
     def decorator(func: F) -> F:
         @wraps(func)
         def wrapper(*args, **kwargs) -> Any:
@@ -64,8 +68,7 @@ def timer(func: Optional[F] = None, *, log_level: str = "info", name: Optional[s
                 end_time = time.time()
                 duration = end_time - start_time
                 log_method = getattr(logger, log_level.lower(), logger.info)
-                log_method(
-                    f"{operation_name} completed in {duration:.4f} seconds")
+                log_method(f"{operation_name} completed in {duration:.4f} seconds")
 
         return cast(F, wrapper)
 
@@ -74,7 +77,7 @@ def timer(func: Optional[F] = None, *, log_level: str = "info", name: Optional[s
     return decorator
 
 
-def retry(max_attempts=3, delay=1, backoff=2, exceptions=(Exception,)):
+def retry(max_attempts=3, delay=1, backoff=2, exceptions=(Exception,), logger=logger):
     """
     Retry decorator with exponential backoff
 
@@ -83,7 +86,9 @@ def retry(max_attempts=3, delay=1, backoff=2, exceptions=(Exception,)):
         delay: Initial delay between retries (seconds)
         backoff: Backoff multiplier
         exceptions: Tuple of exceptions to catch
+        logger: Logger instance
     """
+
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -105,6 +110,7 @@ def retry(max_attempts=3, delay=1, backoff=2, exceptions=(Exception,)):
                     current_delay *= backoff
 
         return wrapper
+
     return decorator
 
 
@@ -158,6 +164,7 @@ def validate_input(**validators):
     def create_user(user_id, name):
         pass
     """
+
     def decorator(func):
         sig = inspect.signature(func)
 
@@ -173,7 +180,8 @@ def validate_input(**validators):
                     value = bound_args.arguments[param_name]
                     if not validator(value):
                         raise ValueError(
-                            f"Invalid value for parameter '{param_name}': {value}")
+                            f"Invalid value for parameter '{param_name}': {value}"
+                        )
 
             return func(*args, **kwargs)
 
@@ -186,7 +194,7 @@ def lazy_property(func):
     """
     Decorator for lazy-loaded properties that are computed once and cached
     """
-    attr_name = '_lazy_' + func.__name__
+    attr_name = "_lazy_" + func.__name__
 
     @property
     @wraps(func)

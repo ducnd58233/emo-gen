@@ -1,14 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar, Optional, List, Callable, Dict
+from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar
 
-from core.logger import get_logger
 from core.decorator import timer
+from core.logger import get_logger
 from processing.interface import PipelineContext, PipelineStage
 
 logger = get_logger("processing.stages.base")
 
-T = TypeVar('T')
-U = TypeVar('U')
+T = TypeVar("T")
+U = TypeVar("U")
 
 
 class BaseStage(PipelineStage[T, U], Generic[T, U], ABC):
@@ -36,21 +36,27 @@ class BaseStage(PipelineStage[T, U], Generic[T, U], ABC):
     @abstractmethod
     def _process_impl(self, input_data: T, context: PipelineContext) -> U:
         """Implementation of stage processing logic"""
-        pass
 
-    def _handle_error(self, error: Exception, input_data: T, context: PipelineContext) -> None:
+    def _handle_error(
+        self, error: Exception, input_data: T, context: PipelineContext
+    ) -> None:
         """Handle error during stage execution (can be overridden by subclasses)"""
         import traceback
+
         logger.error(traceback.format_exc())
-        context.set(f'error_{self.name()}', str(error))
-        context.set(f'error_{self.name()}_traceback', traceback.format_exc())
+        context.set(f"error_{self.name()}", str(error))
+        context.set(f"error_{self.name()}_traceback", traceback.format_exc())
 
 
 class ConditionalStage(BaseStage[T, T], Generic[T]):
     """Stage that conditionally processes data based on a predicate"""
 
-    def __init__(self, condition_func: Callable[[T, PipelineContext], bool],
-                 next_stage: PipelineStage, stage_name: str = None):
+    def __init__(
+        self,
+        condition_func: Callable[[T, PipelineContext], bool],
+        next_stage: PipelineStage,
+        stage_name: str = None,
+    ):
         """
         Initialize with condition and next stage
 
@@ -69,8 +75,7 @@ class ConditionalStage(BaseStage[T, T], Generic[T]):
             logger.info(f"Condition met, executing {self.next_stage.name()}")
             return self.next_stage.process(input_data, context)
         else:
-            logger.info(
-                f"Condition not met, skipping {self.next_stage.name()}")
+            logger.info(f"Condition not met, skipping {self.next_stage.name()}")
             return input_data
 
 
@@ -95,7 +100,8 @@ class ChainStage(BaseStage[T, Any], Generic[T]):
         for i, stage in enumerate(self.stages):
             stage_name = stage.name()
             logger.info(
-                f"Executing chained stage {stage_name} ({i+1}/{len(self.stages)})")
+                f"Executing chained stage {stage_name} ({i+1}/{len(self.stages)})"
+            )
             current_data = stage.process(current_data, context)
 
         return current_data
@@ -104,10 +110,13 @@ class ChainStage(BaseStage[T, Any], Generic[T]):
 class BranchStage(BaseStage[T, U], Generic[T, U]):
     """Stage that branches execution based on a selector function"""
 
-    def __init__(self, selector_func: Callable[[T, PipelineContext], str],
-                 branches: Dict[str, PipelineStage],
-                 default_branch: Optional[PipelineStage] = None,
-                 stage_name: str = None):
+    def __init__(
+        self,
+        selector_func: Callable[[T, PipelineContext], str],
+        branches: Dict[str, PipelineStage],
+        default_branch: Optional[PipelineStage] = None,
+        stage_name: str = None,
+    ):
         """
         Initialize with selector and branch stages
 
@@ -125,17 +134,17 @@ class BranchStage(BaseStage[T, U], Generic[T, U]):
     def _process_impl(self, input_data: T, context: PipelineContext) -> U:
         """Select and execute the appropriate branch"""
         branch_key = self.selector_func(input_data, context)
-        context.set('selected_branch', branch_key)
+        context.set("selected_branch", branch_key)
 
         if branch_key in self.branches:
             branch = self.branches[branch_key]
             logger.info(f"Taking branch '{branch_key}' -> {branch.name()}")
             return branch.process(input_data, context)
         elif self.default_branch:
-            logger.info(
-                f"Taking default branch -> {self.default_branch.name()}")
+            logger.info(f"Taking default branch -> {self.default_branch.name()}")
             return self.default_branch.process(input_data, context)
         else:
             logger.warning(
-                f"No branch found for key '{branch_key}' and no default branch")
+                f"No branch found for key '{branch_key}' and no default branch"
+            )
             return input_data

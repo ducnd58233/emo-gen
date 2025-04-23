@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
 
 class SourceDiscoveryStrategy(ABC):
@@ -9,15 +9,14 @@ class SourceDiscoveryStrategy(ABC):
     def discover(self, html: str, base_url: str) -> List[str]:
         """
         Discover sources to crawl from the HTML content.
-        
+
         Args:
             html: The HTML content
             base_url: The base URL for resolving relative URLs
-            
+
         Returns:
             List of source URLs
         """
-        pass
 
 
 class ItemExtractionStrategy(ABC):
@@ -27,15 +26,14 @@ class ItemExtractionStrategy(ABC):
     def extract(self, html: str, base_url: str) -> List[Dict[str, Any]]:
         """
         Extract items from the HTML content.
-        
+
         Args:
             html: The HTML content
             base_url: The base URL for resolving relative URLs
-            
+
         Returns:
             List of extracted items
         """
-        pass
 
 
 class FetchStrategy(ABC):
@@ -45,14 +43,13 @@ class FetchStrategy(ABC):
     def fetch(self, url: str) -> str:
         """
         Fetch content from a URL.
-        
+
         Args:
             url: The URL to fetch
-            
+
         Returns:
             The fetched content
         """
-        pass
 
 
 class PaginationStrategy(ABC):
@@ -62,38 +59,38 @@ class PaginationStrategy(ABC):
     def get_next_page_url(self, html: str, current_url: str) -> Optional[str]:
         """
         Extract the URL for the next page from the current page.
-        
+
         Args:
             html: The HTML content of the current page
             current_url: The URL of the current page
-            
+
         Returns:
             URL of the next page, or None if there is no next page
         """
-        pass
 
     @abstractmethod
-    def get_pagination_urls(self, html: str, base_url: str, max_pages: int = None) -> List[str]:
+    def get_pagination_urls(
+        self, html: str, base_url: str, max_pages: int = None
+    ) -> List[str]:
         """
         Extract all pagination URLs from the current page.
-        
+
         Args:
             html: The HTML content
             base_url: The base URL for resolving relative URLs
             max_pages: Maximum number of pages to return (default: all)
-            
+
         Returns:
             List of all pagination URLs
         """
-        pass
 
     def is_valid_page(self, html: str) -> bool:
         """
         Check if the page contains valid content (not empty, not error).
-        
+
         Args:
             html: The HTML content to check
-            
+
         Returns:
             True if the page is valid, False otherwise
         """
