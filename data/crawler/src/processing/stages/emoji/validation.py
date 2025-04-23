@@ -1,6 +1,8 @@
+from collections import defaultdict
 from typing import Any, Dict
 
 import pyspark.sql.functions as F
+from core.decorator import timer
 from core.logger import get_logger
 from processing.interface import PipelineContext
 from processing.stages.base import BaseStage
@@ -43,34 +45,58 @@ class MessageValidationStage(BaseStage[Dict[str, Any], DataFrame]):
 
 
 class StatusCheckStage(BaseStage[DataFrame, DataFrame]):
-    """Check emoji status in database and filter crawled ones"""
+    """Check emoji status in database and filter only those with CRAWLED status"""
 
     def __init__(self, repo=None):
         super().__init__("emoji_status_check")
         self.repo = repo or CrawlEmojiRepository()
 
+    @timer(name="Status Check Process")
     def _process_impl(self, input_df: DataFrame, context: PipelineContext) -> DataFrame:
-        """Check emoji status and filter ones with CRAWLED status"""
+        """
+        Check emoji status and filter ones with CRAWLED status.
+        """
         if input_df.rdd.isEmpty():
+            logger.warning("Empty input DataFrame, nothing to process")
+            context.set("all_emoji_ids", [])
             return input_df
 
-        emoji_ids = [int(row["id"]) for row in input_df.select("id").collect()]
-        db_emojis = self.repo.get_by_ids(emoji_ids)
-        crawled_ids = {
-            str(emoji.id)
-            for emoji in db_emojis
-            if emoji.status.value == Status.CRAWLED.value
-        }
+        emoji_rows = input_df.collect()
 
-        # Filter DataFrame to include only crawled emojis
-        filtered_df = input_df.filter(
-            F.col("id").cast("string").isin(list(crawled_ids))
-        )
+        all_emoji_ids = [str(row["id"]) for row in emoji_rows]
+        context.set("all_emoji_ids", all_emoji_ids)
 
-        total_count = input_df.count()
-        filtered_count = filtered_df.count()
+        emoji_by_source = defaultdict(list)
+        for row in emoji_rows:
+            source = row["source"]
+            emoji_by_source[source].append(row)
+
+        crawled_emoji_ids = set()
+
+        for source, emojis in emoji_by_source.items():
+            emoji_names = [emoji["name"] for emoji in emojis]
+
+            matching_emojis = self.repo.filter_by_source_and_status(
+                source=source,
+                status=Status.CRAWLED,
+                identifiers=emoji_names,
+            )
+
+            for matching_emoji in matching_emojis:
+                crawled_emoji_ids.add(str(matching_emoji.id))
+
+        if crawled_emoji_ids:
+            filtered_df = input_df.filter(
+                F.col("id").cast("string").isin(list(crawled_emoji_ids))
+            )
+        else:
+            filtered_df = input_df.limit(0)
+
+        total_count = len(emoji_rows)
+        filtered_count = len(crawled_emoji_ids)
+
         logger.info(
-            f"Found {filtered_count}/{total_count} emojis with {Status.CRAWLED} status"
+            f"Status check complete: found {filtered_count}/{total_count} emojis with {Status.CRAWLED} status"
         )
 
         return filtered_df

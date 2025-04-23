@@ -4,8 +4,8 @@ import sys
 from core.config import config
 from core.logger import get_logger
 from extraction.factory import CrawlerFactory
+from infra.spark.session import SparkSessionManager
 from processing.manager import ProcessingManager
-from processing.spark.session import SparkSessionManager
 
 logger = get_logger("main")
 

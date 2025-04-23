@@ -1,10 +1,15 @@
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
 from core.logger import get_logger
 from sqlalchemy.orm import Session
 from storage.database.client import SessionLocal
 from storage.database.models.emoji import CrawlEmoji, Status
-from storage.database.repositories.base import Repository
+from storage.database.repositories.base import (
+    FILTER_EQ,
+    FILTER_IN,
+    FilterCondition,
+    Repository,
+)
 
 logger = get_logger("storage.database.repositories.crawl_emoji_repository")
 
@@ -28,8 +33,62 @@ class CrawlEmojiRepository(Repository[CrawlEmoji]):
         Returns:
             List of emoji objects with matching IDs
         """
-        with self.get_session(session) as db:
-            return db.query(self.model_class).filter(self.model_class.id.in_(ids)).all()
+        if not ids:
+            return []
+
+        return list(
+            self.filter_by_multiple_values(
+                field="id", values=ids, session=session, as_dict=False
+            )
+        )
+
+    def filter_by_source_and_status(
+        self,
+        source: str,
+        status: Status,
+        identifiers: List[str],
+        as_dict: bool = False,
+        match_by: str = "name",
+        session: Optional[Session] = None,
+    ) -> Union[Dict[str, CrawlEmoji], List[CrawlEmoji]]:
+        """
+        Query emojis efficiently by source, status, and a list of identifiers
+        (either names or image_urls) in a single database call.
+
+        Args:
+            source: Source of the emojis to match
+            status: Status to filter by
+            identifiers: List of names or image_urls to match
+            as_dict: Return results as a dictionary with key_attr as the key
+            match_by: Field to match by ('name' or 'image_url')
+            session: Optional database session
+
+        Returns:
+            Dictionary mapping identifier to emoji object
+        """
+        if not identifiers:
+            return {}
+
+        conditions = [
+            FilterCondition("source", source, FILTER_EQ),
+            FilterCondition("status", status, FILTER_EQ),
+            FilterCondition(match_by, identifiers, FILTER_IN),
+        ]
+
+        result = self.get_many(
+            filters=conditions,
+            limit=len(identifiers) * 2,
+            key_attr=match_by,
+            as_dict=as_dict,
+            session=session,
+        )
+
+        logger.info(
+            f"Found {len(result)} emojis with {status} status for source '{source}' "
+            f"(matched by {match_by}, requested {len(identifiers)})"
+        )
+
+        return result
 
     def get_by_status(
         self,
@@ -111,7 +170,6 @@ class CrawlEmojiRepository(Repository[CrawlEmoji]):
         """
         with self.get_session(session) as db:
             try:
-                # Use update statement for bulk operations - more efficient
                 stmt = (
                     self.model_class.__table__.update()
                     .where(self.model_class.id.in_(emoji_ids))

@@ -2,8 +2,8 @@ import threading
 from typing import Any, Optional
 
 from core.logger import get_logger
-from messaging.kafka.consumer import KafkaMessageConsumer
-from messaging.schema import Message
+from infra.messaging.kafka.consumer import KafkaMessageConsumer
+from infra.messaging.schema import Message
 from processing.factory import PipelineFactory
 from processing.interface import PipelineContext
 from pyspark.sql import DataFrame

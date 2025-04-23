@@ -10,8 +10,8 @@ from extraction.strategies.discord import (
     DiscordSeleniumFetchStrategy,
     DiscordTopicDiscoveryStrategy,
 )
-from messaging.kafka.producer import KafkaMessageProducer
-from messaging.schema import Message
+from infra.messaging.kafka.producer import KafkaMessageProducer
+from infra.messaging.schema import Message
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from storage.database.models.emoji import CrawlEmoji, Status

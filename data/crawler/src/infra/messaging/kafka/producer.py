@@ -5,9 +5,9 @@ from typing import List
 from core.config import config
 from core.decorator import singleton
 from core.logger import get_logger
+from infra.messaging.interface import Producer
+from infra.messaging.schema import Message
 from kafka import KafkaProducer
-from messaging.interface import Producer
-from messaging.schema import Message
 
 logger = get_logger("messaging.kafka.producer")
 

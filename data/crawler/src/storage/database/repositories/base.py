@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Any, Dict, Generic, List, Optional, Type, TypeVar
+from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, Union
 
 from core.logger import get_logger
 from sqlalchemy import func, select
@@ -14,6 +14,54 @@ logger = get_logger("storage.database.repositories.base")
 T = TypeVar("T", bound=Base)
 
 MAX_BATCH_SIZE = 20
+
+# Supported filter operators
+FILTER_EQ = "eq"  # equals (default)
+FILTER_NEQ = "neq"  # not equals
+FILTER_GT = "gt"  # greater than
+FILTER_GTE = "gte"  # greater than or equals
+FILTER_LT = "lt"  # less than
+FILTER_LTE = "lte"  # less than or equals
+FILTER_IN = "in"  # in list
+FILTER_NOT_IN = "not_in"  # not in list
+FILTER_LIKE = "like"  # SQL LIKE
+FILTER_ILIKE = "ilike"  # SQL ILIKE (case insensitive)
+
+
+class FilterCondition:
+    """Represents a filter condition for queries"""
+
+    def __init__(self, field: str, value: Any, operator: str = FILTER_EQ):
+        self.field = field
+        self.value = value
+        self.operator = operator
+
+    def apply(self, query, model_class):
+        """Apply filter condition to query"""
+        field_attr = getattr(model_class, self.field)
+
+        if self.operator == FILTER_EQ:
+            return query.filter(field_attr == self.value)
+        elif self.operator == FILTER_NEQ:
+            return query.filter(field_attr != self.value)
+        elif self.operator == FILTER_GT:
+            return query.filter(field_attr > self.value)
+        elif self.operator == FILTER_GTE:
+            return query.filter(field_attr >= self.value)
+        elif self.operator == FILTER_LT:
+            return query.filter(field_attr < self.value)
+        elif self.operator == FILTER_LTE:
+            return query.filter(field_attr <= self.value)
+        elif self.operator == FILTER_IN:
+            return query.filter(field_attr.in_(self.value))
+        elif self.operator == FILTER_NOT_IN:
+            return query.filter(~field_attr.in_(self.value))
+        elif self.operator == FILTER_LIKE:
+            return query.filter(field_attr.like(self.value))
+        elif self.operator == FILTER_ILIKE:
+            return query.filter(field_attr.ilike(self.value))
+        else:
+            raise ValueError(f"Unsupported filter operator: {self.operator}")
 
 
 class Repository(Generic[T]):
@@ -215,30 +263,47 @@ class Repository(Generic[T]):
         self,
         limit: int = 100,
         offset: int = 0,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: Optional[Union[Dict[str, Any], List[FilterCondition]]] = None,
         order_by: Optional[str] = None,
         session: Optional[Session] = None,
-    ) -> List[T]:
+        as_dict: bool = False,
+        key_attr: Optional[str] = None,
+    ) -> Union[List[T], Dict[Any, T]]:
         """
         Get multiple records with pagination, filtering and ordering
 
         Args:
             limit: Maximum number of records to return
             offset: Number of records to skip
-            filters: Dictionary of field:value pairs to filter by
+            filters: Dictionary of field:value pairs for simple equals filters,
+                    or list of FilterCondition objects for complex filtering
             order_by: Field name to order by (prefix with '-' for descending)
             session: Optional database session
+            as_dict: Return results as a dictionary with key_attr as the key
+            key_attr: Attribute to use as dictionary key when as_dict=True
 
         Returns:
-            List of model objects
+            List of model objects, or dictionary mapping key_attr values to model objects
         """
         with self.get_session(session) as db:
             query = db.query(self.model_class)
 
             # Apply filters
             if filters:
-                for field, value in filters.items():
-                    query = query.filter(getattr(self.model_class, field) == value)
+                if isinstance(filters, dict):
+                    for field, value in filters.items():
+                        if isinstance(value, list):
+                            query = query.filter(
+                                getattr(self.model_class, field).in_(value)
+                            )
+                        else:
+                            query = query.filter(
+                                getattr(self.model_class, field) == value
+                            )
+                else:
+                    # Advanced filtering with FilterCondition objects
+                    for filter_condition in filters:
+                        query = filter_condition.apply(query, self.model_class)
 
             # Apply ordering
             if order_by:
@@ -249,18 +314,74 @@ class Repository(Generic[T]):
                     query = query.order_by(getattr(self.model_class, field))
 
             # Apply pagination
-            return query.offset(offset).limit(limit).all()
+            if limit:
+                query = query.limit(limit)
+            if offset:
+                query = query.offset(offset)
+
+            results = query.all()
+
+            if as_dict and key_attr:
+                result_dict = {}
+                for item in results:
+                    key = getattr(item, key_attr)
+                    result_dict[key] = item
+                return result_dict
+
+            return results
+
+    def filter_by_multiple_values(
+        self,
+        field: str,
+        values: List[Any],
+        filters: Optional[Dict[str, Any]] = None,
+        session: Optional[Session] = None,
+        as_dict: bool = True,
+        key_attr: Optional[str] = None,
+    ) -> Union[List[T], Dict[Any, T]]:
+        """
+        Find records where a field matches any of the provided values, with additional filtering.
+
+        Args:
+            field: Field name to match against values
+            values: List of values to match
+            filters: Additional filters to apply (field:value dictionary)
+            session: Optional database session
+            as_dict: Return results as a dictionary
+            key_attr: Attribute to use as dictionary key when as_dict=True (defaults to field)
+
+        Returns:
+            List of matching objects or dictionary mapping values to objects
+        """
+        if not values:
+            return {} if as_dict else []
+
+        all_filters = filters.copy() if filters else {}
+
+        conditions = [FilterCondition(field, values, FILTER_IN)]
+
+        for field_name, field_value in all_filters.items():
+            conditions.append(FilterCondition(field_name, field_value))
+
+        return self.get_many(
+            filters=conditions,
+            limit=len(values) * 2,
+            as_dict=as_dict,
+            key_attr=key_attr or field,
+            session=session,
+        )
 
     def count(
         self,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: Optional[Union[Dict[str, Any], List[FilterCondition]]] = None,
         session: Optional[Session] = None,
     ) -> int:
         """
         Count records with optional filtering
 
         Args:
-            filters: Dictionary of field:value pairs to filter by
+            filters: Dictionary of field:value pairs for simple equals filters,
+                    or list of FilterCondition objects for complex filtering
             session: Optional database session
 
         Returns:
@@ -271,8 +392,29 @@ class Repository(Generic[T]):
 
             # Apply filters
             if filters:
-                for field, value in filters.items():
-                    query = query.where(getattr(self.model_class, field) == value)
+                if isinstance(filters, dict):
+                    # Simple equals filters from dictionary
+                    for field, value in filters.items():
+                        if isinstance(value, list):
+                            # If value is a list, use IN operator
+                            query = query.where(
+                                getattr(self.model_class, field).in_(value)
+                            )
+                        else:
+                            # Otherwise use equals operator
+                            query = query.where(
+                                getattr(self.model_class, field) == value
+                            )
+                else:
+                    # Advanced filtering with FilterCondition objects
+                    for filter_condition in filters:
+                        attr = getattr(self.model_class, filter_condition.field)
+
+                        if filter_condition.operator == FILTER_EQ:
+                            query = query.where(attr == filter_condition.value)
+                        elif filter_condition.operator == FILTER_IN:
+                            query = query.where(attr.in_(filter_condition.value))
+                        # Add other operators as needed
 
             return db.scalar(query)
 

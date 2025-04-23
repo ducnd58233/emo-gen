@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Callable, List
 
-from messaging.schema import Message
+from infra.messaging.schema import Message
 
 
 class Producer(ABC):

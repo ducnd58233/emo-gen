@@ -22,18 +22,10 @@ class FinalStatusUpdateStage(BaseStage[DataFrame, DataFrame]):
         Update emoji statuses based on processing results in the pipeline.
 
         Emojis are marked as PROCESSED only if they were successfully:
-        1. Downloaded
-        2. Stored in MinIO
-        3. Metadata stored in database
+        1. Downloaded and stored in MinIO (combined in one stage now)
+        2. Metadata stored in database
 
         Otherwise, they are marked as FAILED.
-
-        Args:
-            input_df: Input DataFrame
-            context: Pipeline context with processing results
-
-        Returns:
-            Input DataFrame (unchanged)
         """
         # Get all emoji IDs from context
         all_emoji_ids = context.get("all_emoji_ids", [])
@@ -45,39 +37,39 @@ class FinalStatusUpdateStage(BaseStage[DataFrame, DataFrame]):
 
         failed_ids = [id for id in all_emoji_ids if id not in successful_ids]
 
-        logger.info(f"Processing status updates for {len(all_emoji_ids)} emojis:")
-        logger.info(f"- Successfully processed emojis: {len(successful_ids)}")
-        logger.info(f"- Failed emojis: {len(failed_ids)}")
+        logger.info(f"Final status update: {len(all_emoji_ids)} total emojis")
+        logger.info(f"- Successfully processed: {len(successful_ids)}")
+        logger.info(f"- Failed: {len(failed_ids)}")
 
-        if failed_ids:
-            minio_failed = set(context.get("minio_failed_emoji_ids", []))
-            download_failed = set(context.get("failed_emoji_ids", []))
+        # Log detailed failure breakdown if needed
+        if failed_ids and logger.isEnabledFor(10):  # 10 is DEBUG level
+            download_store_failed = set(context.get("failed_emoji_ids", []))
             metadata_failed = set(context.get("metadata_failed_emoji_ids", []))
 
-            minio_passed_metadata_failed = len(
-                set(context.get("minio_stored_emoji_ids", [])).intersection(
+            # Count emojis that passed download+store but failed metadata
+            download_store_success_metadata_failed = len(
+                set(context.get("successful_emoji_ids", [])).intersection(
                     metadata_failed
                 )
             )
 
-            logger.info(f"Failed emojis breakdown:")
-            logger.info(f"- Download failures: {len(download_failed)}")
-            logger.info(f"- MinIO storage failures: {len(minio_failed)}")
-            logger.info(f"- Metadata storage failures: {len(metadata_failed)}")
-            logger.info(
-                f"- MinIO passed but metadata failed: {minio_passed_metadata_failed}"
+            logger.debug("Failed emojis breakdown:")
+            logger.debug(f"- Download/storage failures: {len(download_store_failed)}")
+            logger.debug(f"- Metadata storage failures: {len(metadata_failed)}")
+            logger.debug(
+                f"- Download/storage passed but metadata failed: {download_store_success_metadata_failed}"
             )
 
-        # Update database statuses - process successful first
+        # Update database statuses
         self._update_emoji_statuses(list(successful_ids), failed_ids)
 
         logger.info(
-            f"Final status update complete: {len(successful_ids)} processed, {len(failed_ids)} failed"
+            f"Status update complete: {len(successful_ids)} processed, {len(failed_ids)} failed"
         )
         return input_df
 
     def _update_emoji_statuses(self, process_ids, fail_ids):
-        """Update emoji statuses in database"""
+        """Update emoji statuses in database in batches"""
         if process_ids:
             try:
                 self.emoji_repo.update_status_bulk(process_ids, Status.PROCESSED)
@@ -101,7 +93,7 @@ class FinalStatusUpdateStage(BaseStage[DataFrame, DataFrame]):
     def _handle_error(
         self, error: Exception, input_data: DataFrame, context: PipelineContext
     ) -> None:
-        """Mark all emojis as failed if the status update stage itself encounters an error"""
+        """Mark all emojis as failed if the stage itself encounters an error"""
         super()._handle_error(error, input_data, context)
 
         import traceback

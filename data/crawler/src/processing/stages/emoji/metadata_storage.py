@@ -15,10 +15,7 @@ BATCH_SIZE = 20
 class MetadataStorageStage(BaseStage[DataFrame, DataFrame]):
     """Stage for storing emoji metadata in the database for successful MinIO uploads"""
 
-    def __init__(
-        self,
-        source_emoji_repo: Optional[SourceEmojiRepository] = None,
-    ):
+    def __init__(self, source_emoji_repo: Optional[SourceEmojiRepository] = None):
         super().__init__("emoji_metadata_storage")
         self.source_emoji_repo = source_emoji_repo or SourceEmojiRepository()
 
@@ -27,58 +24,63 @@ class MetadataStorageStage(BaseStage[DataFrame, DataFrame]):
         """Create source emoji records for emojis successfully stored in MinIO.
 
         Args:
-            input_df: DataFrame with emoji data
+            input_df: DataFrame with emoji data including storage_path from previous stage
             context: Pipeline context with MinIO storage results
 
         Returns:
             Input DataFrame (unchanged)
         """
-        # Initialize default values in context to avoid issues downstream
+        # Initialize context values
         context.set("metadata_stored_emoji_ids", [])
         context.set("metadata_failed_emoji_ids", [])
-        context.set("successful_emoji_ids", [])
 
-        # Get successfully stored emoji IDs from MinIO stage
-        minio_successful_ids = context.get("minio_stored_emoji_ids", [])
-        if not minio_successful_ids:
-            logger.warning("No successfully stored emojis found in MinIO")
+        stored_emoji_ids = context.get("successful_emoji_ids", [])
+        if not stored_emoji_ids:
+            logger.warning("No successfully stored emojis found from previous stage")
+            context.set("successful_emoji_ids", [])
             return input_df
 
-        # Get storage paths from MinIO stage
+        # Get storage paths from context
         storage_paths = context.get("emoji_storage_paths", {})
         if not storage_paths:
             logger.warning("No storage paths found in context")
+            context.set("successful_emoji_ids", [])
             return input_df
 
-        emoji_data = input_df.select("id", "name", "source").collect()
-
+        # Prepare data for database records
+        emoji_info = {str(row["id"]): row for row in input_df.collect()}
         db_records = []
-        for row in emoji_data:
-            emoji_id = str(row["id"])
 
-            if emoji_id not in minio_successful_ids:
-                continue
-
+        for emoji_id in stored_emoji_ids:
+            # Skip if no storage path (should not happen with combined stage)
             if emoji_id not in storage_paths:
                 logger.warning(
                     f"No storage path for emoji {emoji_id}, skipping metadata creation"
                 )
                 continue
 
-            # Get the path that was used in MinIO storage
+            # Skip if no metadata
+            if emoji_id not in emoji_info:
+                logger.warning(
+                    f"No metadata for emoji {emoji_id}, skipping metadata creation"
+                )
+                continue
+
+            # Get emoji metadata
+            emoji_data = emoji_info[emoji_id]
             storage_path = storage_paths[emoji_id]
 
             # Create database record
             db_records.append(
                 {
                     "id": int(emoji_id),
-                    "name": row["name"],
+                    "name": emoji_data["name"],
                     "image_path": storage_path,
-                    "source": row["source"],
+                    "source": emoji_data["source"],
                 }
             )
 
-        # Store in database if we have any records
+        # Store in database
         successful_ids = []
         failed_ids = []
 
@@ -90,37 +92,29 @@ class MetadataStorageStage(BaseStage[DataFrame, DataFrame]):
         else:
             logger.warning("No emoji records to store in database")
 
+        # Update context for status update stage
         context.set("metadata_stored_emoji_ids", successful_ids)
         context.set("metadata_failed_emoji_ids", failed_ids)
 
-        minio_successful_set = set(minio_successful_ids)
+        stored_emoji_set = set(stored_emoji_ids)
         metadata_successful_set = set(successful_ids)
         final_successful_ids = list(
-            minio_successful_set.intersection(metadata_successful_set)
+            stored_emoji_set.intersection(metadata_successful_set)
         )
 
         context.set("successful_emoji_ids", final_successful_ids)
-        logger.info(
-            f"Final successful emojis (both MinIO and metadata): {len(final_successful_ids)}"
-        )
+        logger.info(f"Final successful emojis: {len(final_successful_ids)}")
 
         return input_df
 
     def _store_records_in_batches(
         self, db_records: List[Dict]
     ) -> Tuple[List[str], List[str]]:
-        """Store emoji records in the database in batches.
-
-        Args:
-            db_records: List of prepared database records
-
-        Returns:
-            Tuple of (successful_ids, failed_ids)
-        """
+        """Store emoji records in the database in batches."""
         successful_ids = []
         failed_ids = []
 
-        # Process in batches for better performance and reliability
+        # Process in batches
         total_batches = (len(db_records) + BATCH_SIZE - 1) // BATCH_SIZE
 
         for batch_idx, batch_start in enumerate(range(0, len(db_records), BATCH_SIZE)):
@@ -154,13 +148,14 @@ class MetadataStorageStage(BaseStage[DataFrame, DataFrame]):
         """Handle error during stage execution."""
         super()._handle_error(error, input_data, context)
 
-        logger.error(f"Error in metadata storage stage: {error}")
         import traceback
 
+        logger.error(f"Error in metadata storage stage: {error}")
         logger.error(traceback.format_exc())
 
+        # Set empty lists for downstream stages
         context.set("metadata_stored_emoji_ids", [])
         context.set(
-            "metadata_failed_emoji_ids", context.get("minio_stored_emoji_ids", [])
+            "metadata_failed_emoji_ids", context.get("successful_emoji_ids", [])
         )
         context.set("successful_emoji_ids", [])

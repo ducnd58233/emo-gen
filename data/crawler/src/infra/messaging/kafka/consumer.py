@@ -3,9 +3,9 @@ from typing import Callable, List
 
 from core.config import config
 from core.logger import get_logger
+from infra.messaging.interface import Consumer
+from infra.messaging.schema import Message
 from kafka import KafkaConsumer
-from messaging.interface import Consumer
-from messaging.schema import Message
 
 logger = get_logger("messaging.kafka.consumer")
 
