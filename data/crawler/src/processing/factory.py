@@ -17,7 +17,16 @@ class StageFactory:
 
     @classmethod
     def create_emoji_stages(cls, pipeline: Pipeline) -> List[PipelineStage]:
-        """Create stages for emoji processing pipeline"""
+        """Create stages for emoji processing pipeline
+
+        The stages are executed in the following order:
+        1. MessageValidationStage - Validates incoming message format
+        2. StatusCheckStage - Checks emoji status in database
+        3. EmojiDownloadStage - Downloads emoji images
+        4. MinioStorageStage - Stores emoji images in MinIO
+        5. MetadataStorageStage - Stores emoji metadata in database (only if MinIO storage succeeded)
+        6. FinalStatusUpdateStage - Updates emoji status in database
+        """
         return [
             MessageValidationStage(pipeline),
             StatusCheckStage(),
@@ -81,9 +90,9 @@ class PipelineFactory:
         if pipeline_type == "emoji":
             stages = StageFactory.create_emoji_stages(pipeline)
             builder.with_stages(stages)
+            logger.info("Created emoji processing pipeline with all required stages")
 
-        logger.info(
-            f"Created and configured pipeline of type: {pipeline_type}")
+        logger.info(f"Created and configured pipeline of type: {pipeline_type}")
         return builder.build()
 
     @classmethod

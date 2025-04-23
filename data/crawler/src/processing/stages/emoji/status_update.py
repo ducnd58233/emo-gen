@@ -38,46 +38,54 @@ class FinalStatusUpdateStage(BaseStage[DataFrame, DataFrame]):
         # Get all emoji IDs from context
         all_emoji_ids = context.get("all_emoji_ids", [])
         if not all_emoji_ids:
-            logger.warning(
-                "No emoji IDs found in context, skipping status update")
+            logger.warning("No emoji IDs found in context, skipping status update")
             return input_df
 
         successful_ids = set(context.get("successful_emoji_ids", []))
 
-        logger.info(
-            f"Processing status updates for {len(all_emoji_ids)} emojis")
-        logger.info(f"Successfully processed emojis: {len(successful_ids)}")
+        failed_ids = [id for id in all_emoji_ids if id not in successful_ids]
 
-        process_ids = list(successful_ids)
-        fail_ids = [id for id in all_emoji_ids if id not in successful_ids]
+        logger.info(f"Processing status updates for {len(all_emoji_ids)} emojis:")
+        logger.info(f"- Successfully processed emojis: {len(successful_ids)}")
+        logger.info(f"- Failed emojis: {len(failed_ids)}")
 
-        if fail_ids:
+        if failed_ids:
             minio_failed = set(context.get("minio_failed_emoji_ids", []))
-            metadata_failed = set(context.get("metadata_failed_emoji_ids", []))
             download_failed = set(context.get("failed_emoji_ids", []))
+            metadata_failed = set(context.get("metadata_failed_emoji_ids", []))
+
+            minio_passed_metadata_failed = len(
+                set(context.get("minio_stored_emoji_ids", [])).intersection(
+                    metadata_failed
+                )
+            )
 
             logger.info(f"Failed emojis breakdown:")
             logger.info(f"- Download failures: {len(download_failed)}")
             logger.info(f"- MinIO storage failures: {len(minio_failed)}")
             logger.info(f"- Metadata storage failures: {len(metadata_failed)}")
+            logger.info(
+                f"- MinIO passed but metadata failed: {minio_passed_metadata_failed}"
+            )
 
-        # Update database statuses
-        self._update_emoji_statuses(process_ids, fail_ids)
+        # Update database statuses - process successful first
+        self._update_emoji_statuses(list(successful_ids), failed_ids)
 
         logger.info(
-            f"Final status update complete: {len(process_ids)} processed, {len(fail_ids)} failed")
+            f"Final status update complete: {len(successful_ids)} processed, {len(failed_ids)} failed"
+        )
         return input_df
 
     def _update_emoji_statuses(self, process_ids, fail_ids):
         """Update emoji statuses in database"""
         if process_ids:
             try:
-                self.emoji_repo.update_status_bulk(
-                    process_ids, Status.PROCESSED)
+                self.emoji_repo.update_status_bulk(process_ids, Status.PROCESSED)
                 logger.info(f"Marked {len(process_ids)} emojis as PROCESSED")
             except Exception as e:
                 logger.error(f"Error updating PROCESSED status: {e}")
                 import traceback
+
                 logger.error(traceback.format_exc())
 
         if fail_ids:
@@ -87,19 +95,27 @@ class FinalStatusUpdateStage(BaseStage[DataFrame, DataFrame]):
             except Exception as e:
                 logger.error(f"Error updating FAILED status: {e}")
                 import traceback
+
                 logger.error(traceback.format_exc())
 
-    def _handle_error(self, error: Exception, input_data: DataFrame, context: PipelineContext) -> None:
+    def _handle_error(
+        self, error: Exception, input_data: DataFrame, context: PipelineContext
+    ) -> None:
         """Mark all emojis as failed if the status update stage itself encounters an error"""
         super()._handle_error(error, input_data, context)
+
+        import traceback
+
+        logger.error(f"Error in status update stage: {error}")
+        logger.error(traceback.format_exc())
 
         all_emoji_ids = context.get("all_emoji_ids", [])
         if all_emoji_ids:
             try:
-                self.emoji_repo.update_status_bulk(
-                    all_emoji_ids, Status.FAILED)
+                self.emoji_repo.update_status_bulk(all_emoji_ids, Status.FAILED)
                 logger.error(
-                    f"Status update stage failed, marked all {len(all_emoji_ids)} emojis as FAILED")
+                    f"Status update stage failed, marked all {len(all_emoji_ids)} emojis as FAILED"
+                )
             except Exception as e:
-                logger.error(
-                    f"Error marking emojis as failed after stage error: {e}")
+                logger.error(f"Error marking emojis as failed after stage error: {e}")
+                logger.error(traceback.format_exc())

@@ -1,8 +1,5 @@
 repos:
   - repo: local
-    defaults:
-      files: &src-files ^src/
-      exclude: &std-exclude (__pycache__|__init__.py|\.git|\.venv|\.env|\.idea|data/datastorage)
     hooks:
       - id: autoflake
         name: autoflake
@@ -15,8 +12,6 @@ repos:
           --in-place,
           --recursive,
         ]
-        files: *src-files
-        exclude: *std-exclude
       
       - id: black
         name: black
@@ -24,8 +19,6 @@ repos:
         language: system
         types: [python]
         require_serial: true
-        files: *src-files
-        exclude: *std-exclude
       
       - id: isort
         name: isort
@@ -33,8 +26,6 @@ repos:
         language: system
         types: [python]
         args: [--profile=black, --combine-as]
-        files: *src-files
-        exclude: *std-exclude
       
       - id: trailing-whitespace
         name: Trim Trailing Whitespace
@@ -42,5 +33,3 @@ repos:
         language: system
         types: [python]
         stages: [pre-commit, pre-push, manual]
-        files: *src-files
-        exclude: *std-exclude 

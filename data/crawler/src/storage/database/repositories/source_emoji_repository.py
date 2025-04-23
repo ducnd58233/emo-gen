@@ -30,8 +30,7 @@ class SourceEmojiRepository(Repository[SourceEmoji]):
         """
         with self.get_session(session) as db:
             return (
-                db.query(self.model_class).filter(
-                    self.model_class.name == name).first()
+                db.query(self.model_class).filter(self.model_class.name == name).first()
             )
 
     def get_by_ids(
@@ -72,10 +71,7 @@ class SourceEmojiRepository(Repository[SourceEmoji]):
             Created source emoji object
         """
         source_emoji = SourceEmoji(
-            id=emoji_id,
-            name=name,
-            image_path=image_path,
-            source=source
+            id=emoji_id, name=name, image_path=image_path, source=source
         )
 
         with self.get_session(session) as db:
@@ -106,8 +102,7 @@ class SourceEmojiRepository(Repository[SourceEmoji]):
             List of created source emoji objects
         """
         if not emoji_data:
-            logger.warning(
-                "No emoji data provided to bulk_create_from_crawl_emojis")
+            logger.warning("No emoji data provided to bulk_create_from_crawl_emojis")
             return []
 
         # Validate input data
@@ -116,8 +111,7 @@ class SourceEmojiRepository(Repository[SourceEmoji]):
                 logger.error(
                     f"Missing required keys in emoji data at index {i}: {item}"
                 )
-                raise ValueError(
-                    f"Missing required keys in emoji data: {item}")
+                raise ValueError(f"Missing required keys in emoji data: {item}")
 
             if not isinstance(item["id"], int):
                 try:
@@ -126,8 +120,7 @@ class SourceEmojiRepository(Repository[SourceEmoji]):
                     logger.error(
                         f"Invalid id format in emoji data at index {i}: {item['id']}"
                     )
-                    raise ValueError(
-                        f"Invalid id format in emoji data: {item['id']}")
+                    raise ValueError(f"Invalid id format in emoji data: {item['id']}")
 
             if "source" not in item:
                 item["source"] = "unknown"
@@ -141,7 +134,7 @@ class SourceEmojiRepository(Repository[SourceEmoji]):
                 id=item["id"],
                 name=item["name"],
                 image_path=item["image_path"],
-                source=item.get("source", "unknown")
+                source=item.get("source", "unknown"),
             )
             for item in emoji_data
         ]
@@ -157,8 +150,7 @@ class SourceEmojiRepository(Repository[SourceEmoji]):
                         .filter(self.model_class.id.in_(ids_to_check))
                         .all()
                     )
-                    existing_ids = set(record[0]
-                                       for record in existing_records)
+                    existing_ids = set(record[0] for record in existing_records)
 
                     if existing_ids:
                         logger.info(
@@ -171,13 +163,11 @@ class SourceEmojiRepository(Repository[SourceEmoji]):
                 ]
 
                 if not new_source_emojis:
-                    logger.info(
-                        "All source emojis already exist, skipping creation")
+                    logger.info("All source emojis already exist, skipping creation")
                     # Return existing records
                     return source_emojis
 
-                logger.info(
-                    f"Adding {len(new_source_emojis)} new source emojis")
+                logger.info(f"Adding {len(new_source_emojis)} new source emojis")
                 db.add_all(new_source_emojis)
                 db.commit()
 

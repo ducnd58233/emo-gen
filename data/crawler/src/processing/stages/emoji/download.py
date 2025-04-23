@@ -63,6 +63,11 @@ class EmojiDownloadStage(BaseStage):
         Returns:
             DataFrame with image data column added
         """
+        # Initialize context values
+        context.set("downloaded_emoji_count", 0)
+        context.set("successful_emoji_ids", [])
+        context.set("failed_emoji_ids", [])
+
         # Add image_data column to schema
         df.schema.add("image_data", "binary")
         result_df = df.withColumn("image_data", lit(None))
@@ -71,9 +76,10 @@ class EmojiDownloadStage(BaseStage):
         emoji_data = df.select("id", "image_url").collect()
         if not emoji_data:
             logger.warning("No emoji data to download")
+            context.set("all_emoji_ids", [])
             return result_df
 
-        all_emoji_ids = [emoji["id"] for emoji in emoji_data]
+        all_emoji_ids = [str(emoji["id"]) for emoji in emoji_data]
         context.set("all_emoji_ids", all_emoji_ids)
 
         # Track successful and failed downloads
@@ -97,10 +103,12 @@ class EmojiDownloadStage(BaseStage):
 
             # Track successful and failed downloads
             for emoji_id, image_data in download_results.items():
+                # Ensure all IDs are strings for consistency
+                emoji_id_str = str(emoji_id)
                 if image_data:
-                    successful_emoji_ids.append(emoji_id)
+                    successful_emoji_ids.append(emoji_id_str)
                 else:
-                    failed_emoji_ids.append(emoji_id)
+                    failed_emoji_ids.append(emoji_id_str)
 
         # Store download results in context for later stages to use
         context.set("downloaded_emoji_count", len(successful_emoji_ids))
@@ -184,3 +192,19 @@ class EmojiDownloadStage(BaseStage):
         except Exception as e:
             logger.error(f"Failed to download emoji {emoji_id} from {url}: {e}")
             return None
+
+    def _handle_error(
+        self, error: Exception, input_data: DataFrame, context: PipelineContext
+    ) -> None:
+        """Handle error during stage execution."""
+        super()._handle_error(error, input_data, context)
+
+        import traceback
+
+        logger.error(f"Error in download stage: {error}")
+        logger.error(traceback.format_exc())
+
+        # Mark all emojis as failed
+        all_emoji_ids = context.get("all_emoji_ids", [])
+        context.set("successful_emoji_ids", [])
+        context.set("failed_emoji_ids", all_emoji_ids)

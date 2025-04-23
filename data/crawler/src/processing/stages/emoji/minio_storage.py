@@ -1,5 +1,5 @@
 from io import BytesIO
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 import pyspark.sql.functions as F
 from core.decorator import retry, timer
@@ -49,36 +49,44 @@ class MinioStorageStage(BaseStage[DataFrame, DataFrame]):
         """
         if input_df.rdd.isEmpty():
             logger.warning("Empty DataFrame, skipping MinIO storage stage")
+            context.set("minio_stored_emoji_ids", [])
+            context.set("minio_failed_emoji_ids", [])
+            context.set("emoji_storage_paths", {})
             return input_df
 
         all_emoji_ids = context.get("all_emoji_ids", [])
         if not all_emoji_ids:
-            logger.warning(
-                "No emoji IDs found in context, skipping MinIO storage")
+            logger.warning("No emoji IDs found in context, skipping MinIO storage")
+            context.set("minio_stored_emoji_ids", [])
+            context.set("minio_failed_emoji_ids", [])
+            context.set("emoji_storage_paths", {})
             return input_df
 
         # Extract data from DataFrame with image data
-        emoji_data = input_df.select(
-            "id", "name", "image_data", "source").collect()
+        emoji_data = input_df.select("id", "name", "image_data", "source").collect()
 
         # Track successful and failed operations
         storage_results = self._process_emoji_batches(emoji_data)
 
         # Update context with results
-        successful_ids = [emoji_id for emoji_id, _,
-                          success in storage_results if success]
-        failed_ids = [emoji_id for emoji_id, _,
-                      success in storage_results if not success]
-        storage_paths = {emoji_id: path for emoji_id,
-                         path, success in storage_results if success}
+        successful_ids = [
+            str(emoji_id) for emoji_id, _, success in storage_results if success
+        ]
+        failed_ids = [
+            str(emoji_id) for emoji_id, _, success in storage_results if not success
+        ]
+        storage_paths = {
+            str(emoji_id): path
+            for emoji_id, path, success in storage_results
+            if success
+        }
 
         context.set("minio_stored_emoji_ids", successful_ids)
         context.set("minio_failed_emoji_ids", failed_ids)
         context.set("emoji_storage_paths", storage_paths)
 
         # Add storage_path column to DataFrame for downstream stages
-        result_df = self._update_dataframe_with_storage_paths(
-            input_df, storage_results)
+        result_df = self._update_dataframe_with_storage_paths(input_df, storage_results)
 
         logger.info(
             f"MinIO storage complete: {len(successful_ids)} succeeded, {len(failed_ids)} failed"
@@ -101,7 +109,7 @@ class MinioStorageStage(BaseStage[DataFrame, DataFrame]):
         total_batches = (len(emoji_data) + BATCH_SIZE - 1) // BATCH_SIZE
 
         for batch_idx, batch_start in enumerate(range(0, len(emoji_data), BATCH_SIZE)):
-            batch = emoji_data[batch_start: batch_start + BATCH_SIZE]
+            batch = emoji_data[batch_start : batch_start + BATCH_SIZE]
             logger.info(
                 f"Processing MinIO storage batch {batch_idx + 1}/{total_batches} ({len(batch)} emojis)"
             )
@@ -109,17 +117,14 @@ class MinioStorageStage(BaseStage[DataFrame, DataFrame]):
             batch_results = self._store_emoji_batch(batch)
             results.extend(batch_results)
 
-            success_count = sum(
-                1 for _, _, success in batch_results if success)
+            success_count = sum(1 for _, _, success in batch_results if success)
             logger.info(
                 f"Batch {batch_idx + 1} results: {success_count}/{len(batch)} successful"
             )
 
         return results
 
-    def _store_emoji_batch(
-        self, emoji_batch: List[Row]
-    ) -> List[Tuple[str, str, bool]]:
+    def _store_emoji_batch(self, emoji_batch: List[Row]) -> List[Tuple[str, str, bool]]:
         """Store a batch of emoji images in MinIO.
 
         Args:
@@ -138,7 +143,8 @@ class MinioStorageStage(BaseStage[DataFrame, DataFrame]):
 
             if image_data is None:
                 logger.warning(
-                    f"No image data for emoji {emoji_id}, skipping MinIO storage")
+                    f"No image data for emoji {emoji_id}, skipping MinIO storage"
+                )
                 results.append((emoji_id, "", False))
                 continue
 
@@ -181,7 +187,7 @@ class MinioStorageStage(BaseStage[DataFrame, DataFrame]):
                 "content_type": self._detect_content_type(name),
                 "emoji_id": str(emoji_id),
                 "emoji_name": name,
-                "emoji_source": source
+                "emoji_source": source,
             }
 
             # Convert to BytesIO if needed
@@ -201,6 +207,7 @@ class MinioStorageStage(BaseStage[DataFrame, DataFrame]):
         except Exception as e:
             logger.error(f"Failed to store emoji {emoji_id} in MinIO: {e}")
             import traceback
+
             logger.error(traceback.format_exc())
             return False
 
@@ -213,9 +220,9 @@ class MinioStorageStage(BaseStage[DataFrame, DataFrame]):
         Returns:
             MIME type string
         """
-        if filename.lower().endswith('.gif'):
+        if filename.lower().endswith(".gif"):
             return "image/gif"
-        elif filename.lower().endswith(('.jpg', '.jpeg')):
+        elif filename.lower().endswith((".jpg", ".jpeg")):
             return "image/jpeg"
         else:
             # Default to PNG for most emoji
@@ -277,12 +284,13 @@ class MinioStorageStage(BaseStage[DataFrame, DataFrame]):
             Sanitized filename
         """
         import re
+
         # Remove path separators and other problematic characters
-        sanitized = re.sub(r'[\\/*?:"<>|]', '_', filename)
+        sanitized = re.sub(r'[\\/*?:"<>|]', "_", filename)
         # Ensure filename isn't too long
         if len(sanitized) > 100:
             # Keep extension if present
-            parts = sanitized.rsplit('.', 1)
+            parts = sanitized.rsplit(".", 1)
             if len(parts) > 1:
                 sanitized = f"{parts[0][:96]}.{parts[1]}"
             else:
@@ -302,6 +310,7 @@ class MinioStorageStage(BaseStage[DataFrame, DataFrame]):
         super()._handle_error(error, input_data, context)
 
         import traceback
+
         logger.error(f"Error in MinIO storage stage: {error}")
         logger.error(traceback.format_exc())
 
