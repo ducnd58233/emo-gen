@@ -3,6 +3,7 @@ from datetime import timedelta
 from logging import getLogger
 from typing import BinaryIO, Dict, List, Optional, Union
 
+import urllib3
 from core.config import config
 from core.decorator import retry, timer
 from minio import Minio
@@ -17,11 +18,19 @@ class MinioClient:
         access_key: str = config.minio.access_key,
         secret_key: str = config.minio.secret_key,
         secure: bool = config.minio.secure,
+        max_pool_size: int = config.minio.max_pool_size,
+        max_connections: int = config.minio.max_connections,
+        connect_timeout: int = config.minio.connect_timeout,
+        response_timeout: int = config.minio.response_timeout,
     ):
         self.endpoint = endpoint
         self.access_key = access_key
         self.secret_key = secret_key
         self.secure = secure
+        self.max_pool_size = max_pool_size
+        self.max_connections = max_connections
+        self.connect_timeout = connect_timeout
+        self.response_timeout = response_timeout
         self._client = None
 
         self.bucket_map = {
@@ -46,14 +55,31 @@ class MinioClient:
         if self._client is None:
             logger.info(f"Initializing MinIO client to {self.endpoint}")
             try:
+                # Configure HTTP client with connection pooling
+                http_client = urllib3.PoolManager(
+                    maxsize=self.max_pool_size,  # Maximum connections per host
+                    num_pools=self.max_connections,  # Maximum number of connection pools
+                    timeout=urllib3.Timeout(
+                        connect=self.connect_timeout, read=self.response_timeout
+                    ),
+                    retries=urllib3.Retry(
+                        total=5,
+                        backoff_factor=0.2,
+                        status_forcelist=[500, 502, 503, 504],
+                    ),
+                )
+
                 self._client = Minio(
                     endpoint=self.endpoint,
                     access_key=self.access_key,
                     secret_key=self.secret_key,
                     secure=self.secure,
+                    http_client=http_client,
                 )
                 self._ensure_buckets_exist()
-                logger.info("MinIO client initialized successfully")
+                logger.info(
+                    f"MinIO client initialized successfully with pool size {self.max_pool_size}"
+                )
             except Exception as e:
                 logger.error(f"Failed to initialize MinIO client: {e}")
                 raise

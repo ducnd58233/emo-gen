@@ -33,6 +33,50 @@ def singleton(cls):
     return cls
 
 
+def request_delay(delay_seconds: float = 5.0, log_level: str = "debug"):
+    """
+    Decorator to add delay between requests to avoid overloading servers.
+    This helps with rate limiting and being a good web citizen.
+
+    Args:
+        delay_seconds: Number of seconds to wait before executing function (default: 5.0)
+        log_level: Logging level for delay messages (default: debug)
+
+    Example:
+        @request_delay(delay_seconds=3.0)
+        def fetch_url(url):
+            # This will wait 3 seconds before executing
+            return requests.get(url)
+    """
+
+    def decorator(func: F) -> F:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            url = kwargs.get("url", None)
+            if url is None and args:
+                # Try to find url in the positional arguments
+                # Many fetch methods have 'url' as first parameter
+                url = args[0] if isinstance(args[0], str) else None
+
+            # Get the appropriate logging method
+            log_method = getattr(logger, log_level.lower(), logger.debug)
+
+            # Log and delay
+            if url:
+                log_method(
+                    f"Waiting {delay_seconds:.1f} seconds before requesting: {url}"
+                )
+            else:
+                log_method(f"Waiting {delay_seconds:.1f} seconds before request")
+
+            time.sleep(delay_seconds)
+            return func(*args, **kwargs)
+
+        return cast(F, wrapper)
+
+    return decorator
+
+
 def timer(
     func: Optional[F] = None, *, log_level: str = "info", name: Optional[str] = None
 ) -> Any:

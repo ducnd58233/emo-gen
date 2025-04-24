@@ -3,10 +3,7 @@ from typing import Dict, List, Type
 from core.logger import get_logger
 from processing.interface import Pipeline, PipelineStage
 from processing.pipelines.emoji import EmojiPipeline
-from processing.stages.emoji.download_and_store import EmojiDownloadAndStoreStage
-from processing.stages.emoji.metadata_storage import MetadataStorageStage
-from processing.stages.emoji.status_update import FinalStatusUpdateStage
-from processing.stages.emoji.validation import MessageValidationStage, StatusCheckStage
+from processing.stages.emoji.processing_chain import ChainedEmojiProcessingStage
 
 logger = get_logger("processing.factory")
 
@@ -18,20 +15,10 @@ class StageFactory:
     def create_emoji_stages(cls, pipeline: Pipeline) -> List[PipelineStage]:
         """Create stages for emoji processing pipeline
 
-        The stages are executed in the following order:
-        1. MessageValidationStage - Validates incoming message format
-        2. StatusCheckStage - Checks emoji status in database
-        3. EmojiDownloadAndStoreStage - Downloads emoji images and immediately stores them in MinIO
-        4. MetadataStorageStage - Stores emoji metadata in database
-        5. FinalStatusUpdateStage - Updates emoji status in database
+        Creates a single ChainedEmojiProcessingStage that handles the complete
+        emoji processing flow with optimal conditional execution.
         """
-        return [
-            MessageValidationStage(pipeline),
-            StatusCheckStage(),
-            EmojiDownloadAndStoreStage(),
-            MetadataStorageStage(),
-            FinalStatusUpdateStage(),
-        ]
+        return [ChainedEmojiProcessingStage(pipeline)]
 
 
 class PipelineBuilder:
@@ -87,7 +74,7 @@ class PipelineFactory:
         if pipeline_type == "emoji":
             stages = StageFactory.create_emoji_stages(pipeline)
             builder.with_stages(stages)
-            logger.info("Created emoji processing pipeline")
+            logger.info("Created emoji processing pipeline with chained stages")
 
         logger.info(f"Created and configured pipeline of type: {pipeline_type}")
         return builder.build()

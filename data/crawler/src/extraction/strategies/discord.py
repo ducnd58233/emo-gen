@@ -28,7 +28,9 @@ class DiscordSeleniumFetchStrategy(FetchStrategy):
         driver: webdriver.Chrome,
         wait_time: int = config.crawler.wait_time,
         sleep_time: int = config.crawler.sleep_time,
+        delay_seconds: float = config.crawler.request_delay_seconds,
     ):
+        super().__init__(delay_seconds=delay_seconds)
         self.driver = driver
         self.wait_time = wait_time
         self.sleep_time = sleep_time
@@ -51,7 +53,25 @@ class DiscordSeleniumFetchStrategy(FetchStrategy):
             except Exception as e:
                 logger.warning(f"Could not click 'More tags' button: {e}")
 
-        sleep(self.sleep_time)
+        try:
+            logger.debug(
+                f"Waiting up to {self.wait_time} seconds for emoji elements to load"
+            )
+
+            WebDriverWait(self.driver, self.wait_time).until(
+                lambda driver: len(
+                    driver.find_elements(
+                        By.CSS_SELECTOR, 'a[href^="/emoji-list/download?id="]'
+                    )
+                )
+                > 0
+            )
+            logger.debug(f"Found emoji elements, page loaded successfully")
+        except Exception as e:
+            logger.warning(
+                f"Timed out waiting for emoji elements: {e}. Will proceed with parsing anyway."
+            )
+
         return self.driver.page_source
 
 
@@ -102,12 +122,12 @@ class DiscordEmojiExtractionStrategy(ItemExtractionStrategy):
 class DiscordPaginationStrategy(PaginationStrategy):
     """Strategy for handling pagination on Discord emoji pages"""
 
-    def __init__(self, max_pages: int = 20):
+    def __init__(self, max_pages: int = 1000):
         """
         Initialize the pagination strategy.
 
         Args:
-            max_pages: Maximum number of pages to process (default: 20)
+            max_pages: Maximum number of pages to process (default: 1000)
         """
         self.max_pages = max_pages
 
@@ -145,7 +165,7 @@ class DiscordPaginationStrategy(PaginationStrategy):
                 new_query = urlencode(query_params, doseq=True)
                 parts = list(parsed_url)
                 parts[4] = new_query
-                return urlparse("").geturl()
+                return urlunparse(tuple(parts))
             return None
 
         max_page = 1

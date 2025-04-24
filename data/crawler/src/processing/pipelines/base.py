@@ -101,6 +101,10 @@ class SparkPipeline(Pipeline):
                     import traceback
 
                     logger.error(traceback.format_exc())
+                    # Update context with error info
+                    context.set(f"error_stage", stage_name)
+                    context.set(f"error_message", str(e))
+                    context.set(f"error_traceback", traceback.format_exc())
                     raise
 
             # Phase 3: Post-process

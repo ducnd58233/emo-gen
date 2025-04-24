@@ -19,6 +19,10 @@ class DatabaseSettings(BaseSettings):
     user: str = Field(default="postgres")
     password: str = Field(default="postgres")
     name: str = Field(default="emogen")
+    pool_size: int = Field(default=20)
+    max_overflow: int = Field(default=30)
+    pool_timeout: int = Field(default=30)
+    pool_recycle: int = Field(default=1800)
 
     model_config = SettingsConfigDict(
         env_prefix="DB_", case_sensitive=False, extra="ignore"
@@ -45,6 +49,10 @@ class MinioSettings(BaseSettings):
     secret_key: str = Field(default="minioadmin")
     bucket_name: str = Field(default="emojis")
     secure: bool = Field(default=False)
+    max_pool_size: int = Field(default=30)
+    max_connections: int = Field(default=50)
+    connect_timeout: int = Field(default=60)
+    response_timeout: int = Field(default=60)
 
     model_config = SettingsConfigDict(
         env_prefix="MINIO_", case_sensitive=False, extra="ignore"
@@ -56,6 +64,7 @@ class CrawlerSettings(BaseSettings):
     page_limit: int = Field(default=10)
     wait_time: int = Field(default=10)
     sleep_time: int = Field(default=5)
+    request_delay_seconds: float = Field(default=5.0)
 
     model_config = SettingsConfigDict(
         env_prefix="CRAWLER_", case_sensitive=False, extra="ignore"

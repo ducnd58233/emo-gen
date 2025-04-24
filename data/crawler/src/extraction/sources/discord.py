@@ -3,7 +3,12 @@ from typing import Any, Dict, List
 from core.config import config
 from core.decorator import lazy_property, retry, timer
 from core.logger import get_logger
-from extraction.interface import ICrawler
+from extraction.interface import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_MAX_PAGES,
+    DEFAULT_MAX_WORKERS,
+    ICrawler,
+)
 from extraction.strategies.discord import (
     DiscordEmojiExtractionStrategy,
     DiscordPaginationStrategy,
@@ -31,9 +36,9 @@ class DiscordEmojiCrawler(ICrawler):
     def __init__(
         self,
         headless: bool = config.crawler.headless,
-        max_workers: int = 4,
-        batch_size: int = 20,
-        max_pages: int = 1000,
+        max_workers: int = DEFAULT_MAX_WORKERS,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+        max_pages: int = DEFAULT_MAX_PAGES,
     ):
         super().__init__(
             max_workers=max_workers, batch_size=batch_size, max_pages=max_pages
@@ -46,7 +51,12 @@ class DiscordEmojiCrawler(ICrawler):
 
     @lazy_property
     def fetch_strategy(self):
-        return DiscordSeleniumFetchStrategy(self.driver)
+        return DiscordSeleniumFetchStrategy(
+            self.driver,
+            wait_time=config.crawler.wait_time,
+            sleep_time=config.crawler.sleep_time,
+            delay_seconds=config.crawler.request_delay_seconds,
+        )
 
     @lazy_property
     def discovery_strategy(self):

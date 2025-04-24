@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
+from core.decorator import request_delay
+
 
 class SourceDiscoveryStrategy(ABC):
     """Strategy for discovering sources (topics, categories, etc.)"""
@@ -39,10 +41,21 @@ class ItemExtractionStrategy(ABC):
 class FetchStrategy(ABC):
     """Strategy for fetching content from a URL"""
 
+    def __init__(self, delay_seconds: float = 5.0):
+        """
+        Initialize fetch strategy with configurable delay
+
+        Args:
+            delay_seconds: Number of seconds to wait between requests (default: 5.0)
+        """
+        self.delay_seconds = delay_seconds
+
+    @request_delay()
     @abstractmethod
     def fetch(self, url: str) -> str:
         """
         Fetch content from a URL.
+        This method will automatically wait between requests based on the delay_seconds parameter.
 
         Args:
             url: The URL to fetch

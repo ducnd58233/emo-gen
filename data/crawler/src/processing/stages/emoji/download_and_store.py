@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from logging import getLogger
 from typing import Dict, List, Optional, Tuple
@@ -28,7 +28,7 @@ EMOJI_STORAGE_PREFIX = "emoji"
 
 
 class EmojiDownloadAndStoreStage(BaseStage):
-    """Stage for downloading emoji images and immediately storing them in MinIO"""
+    """Stage for downloading emoji images and storing them in MinIO using parallel processing"""
 
     def __init__(
         self,
@@ -47,7 +47,7 @@ class EmojiDownloadAndStoreStage(BaseStage):
                 max_delay=MAX_DELAY_SECONDS,
                 max_retry_delay=MAX_RETRY_DELAY,
                 max_retries=DEFAULT_MAX_RETRIES,
-                timeout=10,  # 10 seconds
+                timeout=10,
             )
         )
 
@@ -56,17 +56,18 @@ class EmojiDownloadAndStoreStage(BaseStage):
 
     @timer(name="Download and Store Process")
     def _process_impl(self, df: DataFrame, context: PipelineContext) -> DataFrame:
-        """Download emoji images and immediately store them in MinIO.
+        """
+        Download emoji images and store them in MinIO
+
+        Args:
+            df: DataFrame with emoji data
+            context: Pipeline context
 
         Returns:
             DataFrame with storage_path column added
         """
-        # Initialize context values
-        context.set("all_emoji_ids", [])
-        context.set("downloaded_emoji_count", 0)
-        context.set("successful_emoji_ids", [])
-        context.set("failed_emoji_ids", [])
-        context.set("emoji_storage_paths", {})
+        # Initialize tracking data in context
+        self._initialize_context(context)
 
         # Extract data for processing
         emoji_data = df.select("id", "image_url", "name", "source").collect()
@@ -74,16 +75,18 @@ class EmojiDownloadAndStoreStage(BaseStage):
             logger.warning("No emoji data to process")
             return df
 
-        if "storage_path" not in df.columns:
-            result_df = df.withColumn("storage_path", F.lit(None))
-        else:
-            result_df = df
+        # Prepare result DataFrame
+        result_df = (
+            df.withColumn("storage_path", F.lit(None))
+            if "storage_path" not in df.columns
+            else df
+        )
 
         # Set all emoji IDs in context
         all_emoji_ids = [str(emoji["id"]) for emoji in emoji_data]
         context.set("all_emoji_ids", all_emoji_ids)
 
-        # Track successful and failed operations
+        # Process all emojis in batches
         successful_ids = []
         failed_ids = []
         storage_paths = {}
@@ -93,7 +96,6 @@ class EmojiDownloadAndStoreStage(BaseStage):
             range(0, len(emoji_data), self.batch_size)
         ):
             batch = emoji_data[batch_start : batch_start + self.batch_size]
-
             logger.info(
                 f"Processing batch {batch_idx + 1}/{total_batches} ({len(batch)} emojis)"
             )
@@ -115,21 +117,41 @@ class EmojiDownloadAndStoreStage(BaseStage):
                 else:
                     failed_ids.append(emoji_id_str)
 
-        context.set("downloaded_emoji_count", len(successful_ids))
-        context.set("successful_emoji_ids", successful_ids)
-        context.set("failed_emoji_ids", failed_ids)
-        context.set("emoji_storage_paths", storage_paths)
-
-        context.set("minio_stored_emoji_ids", successful_ids)
-        context.set("minio_failed_emoji_ids", failed_ids)
+        # Update context with results
+        self._update_context(context, successful_ids, failed_ids, storage_paths)
 
         logger.info(
             f"Completed processing {len(emoji_data)} emojis: {len(successful_ids)} succeeded, {len(failed_ids)} failed"
         )
         return result_df
 
+    def _initialize_context(self, context: PipelineContext) -> None:
+        """Initialize tracking data in context"""
+        context.set("all_emoji_ids", [])
+        context.set("downloaded_emoji_count", 0)
+        context.set("successful_emoji_ids", [])
+        context.set("failed_emoji_ids", [])
+        context.set("emoji_storage_paths", {})
+
+    def _update_context(
+        self,
+        context: PipelineContext,
+        successful_ids: List[str],
+        failed_ids: List[str],
+        storage_paths: Dict[str, str],
+    ) -> None:
+        """Update context with processing results"""
+        context.set("downloaded_emoji_count", len(successful_ids))
+        context.set("successful_emoji_ids", successful_ids)
+        context.set("failed_emoji_ids", failed_ids)
+        context.set("emoji_storage_paths", storage_paths)
+        context.set("minio_stored_emoji_ids", successful_ids)
+        context.set("minio_failed_emoji_ids", failed_ids)
+
     def _process_batch(self, batch: List[Dict]) -> List[Tuple[str, str, bool]]:
-        """Process a batch of emojis: download and store in MinIO"""
+        """Process a batch of emojis in parallel using ThreadPoolExecutor"""
+        results = []
+
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {
                 executor.submit(
@@ -142,11 +164,9 @@ class EmojiDownloadAndStoreStage(BaseStage):
                 for emoji in batch
             }
 
-            results = []
-            for future in futures:
+            for future in as_completed(futures):
                 emoji_id = futures[future]
                 try:
-                    # Get result (storage_path, success)
                     storage_path, success = future.result()
                     results.append((emoji_id, storage_path, success))
                 except Exception as e:
@@ -160,7 +180,7 @@ class EmojiDownloadAndStoreStage(BaseStage):
     def _download_and_store_emoji(
         self, url: str, emoji_id: str, name: str, source: str
     ) -> Tuple[str, bool]:
-        """Download emoji and immediately store it in MinIO"""
+        """Download emoji and store it in MinIO"""
         try:
             image_data = self._download_emoji(url, emoji_id)
             if not image_data:
@@ -229,7 +249,7 @@ class EmojiDownloadAndStoreStage(BaseStage):
             return False
 
     def _detect_content_type(self, filename: str) -> str:
-        """Detect content type based on file extension."""
+        """Detect content type based on file extension"""
         if filename.lower().endswith(".gif"):
             return "image/gif"
         elif filename.lower().endswith((".jpg", ".jpeg")):
@@ -238,13 +258,13 @@ class EmojiDownloadAndStoreStage(BaseStage):
             return "image/png"
 
     def _generate_storage_path(self, source: str, name: str) -> str:
-        """Generate MinIO storage path for an emoji."""
+        """Generate MinIO storage path for an emoji"""
         safe_source = self._sanitize_filename(source)
         safe_name = self._sanitize_filename(name)
         return f"{EMOJI_STORAGE_PREFIX}/{safe_source}_{safe_name}"
 
     def _sanitize_filename(self, filename: str) -> str:
-        """Sanitize filename to be safe for storage."""
+        """Sanitize filename to be safe for storage"""
         import re
 
         # Remove path separators and other problematic characters
@@ -262,7 +282,7 @@ class EmojiDownloadAndStoreStage(BaseStage):
     def _handle_error(
         self, error: Exception, input_data: DataFrame, context: PipelineContext
     ) -> None:
-        """Handle error during stage execution."""
+        """Handle error during stage execution"""
         super()._handle_error(error, input_data, context)
 
         import traceback
