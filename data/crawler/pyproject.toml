@@ -1,0 +1,33 @@
+[project]
+name = "crawler"
+version = "0.1.0"
+description = ""
+authors = [{ name = "ducnd58233", email = "only4wns@gmail.com" }]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "sqlalchemy (>=2.0.40,<3.0.0)",
+    "beautifulsoup4 (>=4.13.4,<5.0.0)",
+    "python-dotenv (>=1.1.0,<2.0.0)",
+    "pytz (>=2025.2,<2026.0)",
+    "selenium (>=4.31.0,<5.0.0)",
+    "psycopg2 (>=2.9.10,<3.0.0)",
+    "webdriver-manager (>=4.0.2,<5.0.0)",
+    "pydantic (>=2.11.3,<3.0.0)",
+    "pydantic-settings (>=2.9.0,<3.0.0)",
+    "kafka-python (>=2.1.5,<3.0.0)",
+    "minio (>=7.2.15,<8.0.0)",
+    "pyspark (>=3.2.0,<4.0.0)",
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.2.0"
+pre-commit-hooks = "^5.0.0"
+black = "^25.1.0"
+isort = "^6.0.1"
+autoflake = "^2.3.1"

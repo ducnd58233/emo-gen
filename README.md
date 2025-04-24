@@ -5,6 +5,7 @@
     * backend
     * frontend
     * ai
+    * data
     * devops
   * `<service>`: check inside the <field> directory, e.g landside
 

@@ -1,0 +1,35 @@
+repos:
+  - repo: local
+    hooks:
+      - id: autoflake
+        name: autoflake
+        entry: autoflake
+        language: system
+        types: [python]
+        args: [
+          --remove-all-unused-imports,
+          --remove-unused-variables,
+          --in-place,
+          --recursive,
+        ]
+      
+      - id: black
+        name: black
+        entry: black
+        language: system
+        types: [python]
+        require_serial: true
+      
+      - id: isort
+        name: isort
+        entry: isort
+        language: system
+        types: [python]
+        args: [--profile=black, --combine-as]
+      
+      - id: trailing-whitespace
+        name: Trim Trailing Whitespace
+        entry: trailing-whitespace-fixer
+        language: system
+        types: [python]
+        stages: [pre-commit, pre-push, manual]
